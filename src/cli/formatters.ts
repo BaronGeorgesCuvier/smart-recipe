@@ -1,4 +1,53 @@
-export function formatUserForTerminal(device: "mc" | "tm", user: any): string {
+type DisplayRecord = {
+  id?: string | number;
+  title?: string;
+  status?: string;
+  recipeUrl?: string;
+  updatedAt?: string;
+  deviceTypes?: unknown[];
+  ingredientCount?: number;
+  stepCount?: number;
+  hasImage?: boolean;
+  hasHints?: boolean;
+  recipes?: DisplayRecord[];
+  total?: number;
+  totalPage?: number;
+  userInfo?: DisplayRecord;
+  username?: string;
+  givenName?: string;
+  lastName?: string;
+  email?: string;
+  locale?: string;
+  displayName?: string;
+  nickname?: string;
+  firstName?: string;
+  languageLocale?: string;
+  isPublic?: boolean;
+  picture?: string;
+  pictureTemplate?: string;
+  savedSearches?: DisplayRecord[];
+  search?: DisplayRecord;
+  countries?: unknown[];
+  languages?: unknown[];
+  accessories?: unknown[];
+  foodPreferences?: unknown[];
+  thermomixes?: unknown[];
+  meta?: Record<string, unknown>;
+  deviceName?: string;
+  configPath?: string;
+  localEnvPath?: string;
+  openAiKeyPresent?: boolean;
+  cookie?: { present?: boolean; key?: string };
+  tm?: { locale?: string; version?: string };
+  mc?: { foodProcessor?: boolean };
+  auth?: DisplayRecord;
+  recommendations?: string[];
+  checked?: boolean;
+  ok?: boolean;
+  message?: string;
+};
+
+export function formatUserForTerminal(device: "mc" | "tm", user: DisplayRecord): string {
   const parts: string[] = [];
   const boldMagenta = "\x1b[1m\x1b[95m";
   const boldCyan = "\x1b[1m\x1b[36m";
@@ -48,7 +97,7 @@ export function formatUserForTerminal(device: "mc" | "tm", user: any): string {
     if (savedSearches.length === 0) {
       parts.push(`    ${gray}None${reset}`);
     } else {
-      savedSearches.forEach((savedSearch: any, index: number) => {
+      savedSearches.forEach((savedSearch: DisplayRecord, index: number) => {
         const search = savedSearch.search ?? {};
         parts.push(`    ${index + 1}. ${boldCyan}${savedSearch.id ?? "unnamed"}${reset}`);
         parts.push(`       Countries:    ${formatList(search.countries)}`);
@@ -67,7 +116,7 @@ export function formatUserForTerminal(device: "mc" | "tm", user: any): string {
     if (thermomixes.length === 0) {
       parts.push(`    ${gray}None registered in profile response${reset}`);
     } else {
-      thermomixes.forEach((tm: any, index: number) => {
+      thermomixes.forEach((tm: unknown, index: number) => {
         parts.push(`    ${index + 1}. ${formatObjectSummary(tm)}`);
       });
     }
@@ -86,7 +135,7 @@ export function formatUserForTerminal(device: "mc" | "tm", user: any): string {
   return parts.join("\n");
 }
 
-export function formatRecipesForTerminal(device: "mc" | "tm", result: any): string {
+export function formatRecipesForTerminal(device: "mc" | "tm", result: DisplayRecord): string {
   const parts: string[] = [];
   const boldMagenta = "\x1b[1m\x1b[95m";
   const boldCyan = "\x1b[1m\x1b[36m";
@@ -113,7 +162,7 @@ export function formatRecipesForTerminal(device: "mc" | "tm", result: any): stri
     return parts.join("\n");
   }
 
-  recipes.forEach((recipe: any, idx: number) => {
+  recipes.forEach((recipe: DisplayRecord, idx: number) => {
     parts.push(`  ${boldGreen}[${idx + 1}]${reset}  ${boldCyan}${recipe.title || "Untitled"}${reset} (${recipe.status || "unknown"})`);
     parts.push(`       ID:  ${recipe.id}`);
     if (recipe.recipeUrl) {
@@ -134,7 +183,7 @@ export function formatRecipesForTerminal(device: "mc" | "tm", result: any): stri
   return parts.join("\n");
 }
 
-export function formatDraftsForTerminal(_device: "mc" | "tm", result: any): string {
+export function formatDraftsForTerminal(_device: "mc" | "tm", result: DisplayRecord): string {
   const parts: string[] = [];
   const boldMagenta = "\x1b[1m\x1b[95m";
   const boldCyan = "\x1b[1m\x1b[36m";
@@ -158,7 +207,7 @@ export function formatDraftsForTerminal(_device: "mc" | "tm", result: any): stri
     return parts.join("\n");
   }
 
-  result.recipes.forEach((recipe: any, idx: number) => {
+  (result.recipes ?? []).forEach((recipe: DisplayRecord, idx: number) => {
     parts.push(`  ${boldGreen}[${idx + 1}]${reset}  ${boldCyan}${recipe.title}${reset} (${recipe.status || "draft"})`);
     parts.push(`       ID:  ${recipe.id}`);
     if (recipe.recipeUrl) {
@@ -174,7 +223,7 @@ export function formatDraftsForTerminal(_device: "mc" | "tm", result: any): stri
   return parts.join("\n");
 }
 
-export function formatDoctorForTerminal(report: any): string {
+export function formatDoctorForTerminal(report: DisplayRecord): string {
   const parts: string[] = [];
   const boldMagenta = "\x1b[1m\x1b[95m";
   const boldCyan = "\x1b[1m\x1b[36m";
@@ -194,7 +243,7 @@ export function formatDoctorForTerminal(report: any): string {
   parts.push(`  Config:      ${report.configPath}`);
   parts.push(`  Local .env:  ${report.localEnvPath}`);
   parts.push(`  OpenAI key:  ${report.openAiKeyPresent ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`}`);
-  parts.push(`  Cookie:      ${report.cookie.present ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`} (${report.cookie.key})`);
+  parts.push(`  Cookie:      ${report.cookie?.present ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`} (${report.cookie?.key})`);
   if (report.tm) {
     parts.push(`  TM locale:   ${report.tm.locale}`);
     parts.push(`  TM version:  ${report.tm.version}`);
@@ -215,7 +264,7 @@ export function formatDoctorForTerminal(report: any): string {
   return parts.join("\n");
 }
 
-function formatAuthStatus(auth: any): string {
+function formatAuthStatus(auth: DisplayRecord | undefined): string {
   if (!auth?.checked) return "not checked";
   if (auth.ok) return "ok";
   return `failed (${auth.message || "unknown error"})`;

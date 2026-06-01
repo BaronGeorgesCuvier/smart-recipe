@@ -1,4 +1,10 @@
 import type { CookidooRecipeInput } from "../devices/tm/schema.js";
+import { getArray, getNumber, getRecord, getString, isRecord } from "../utils/unknown.js";
+
+type CookidooStepInput = CookidooRecipeInput["steps"][number];
+type CookidooModeInput = NonNullable<CookidooStepInput["modeAnnotations"]>[number]["mode"];
+type CookidooIngredientAnnotation = NonNullable<CookidooStepInput["ingredientAnnotations"]>[number];
+type CookidooModeAnnotation = NonNullable<CookidooStepInput["modeAnnotations"]>[number];
 
 export function cleanHtmlText(text: string): string {
   if (!text) return "";
@@ -24,30 +30,32 @@ export function parseIsoDuration(duration: string): number {
   return hours * 60 + minutes + Math.round(seconds / 60);
 }
 
-function turboModeFromText(durationText: string, countText?: string) {
+function turboModeFromText(durationText: string, countText?: string): CookidooModeInput | undefined {
   const pulseDuration = Number(durationText.replace(",", "."));
   if (pulseDuration !== 0.5 && pulseDuration !== 1 && pulseDuration !== 2) {
     return undefined;
   }
   const pulseCount = countText ? parseInt(countText, 10) : undefined;
   return {
-    type: "turbo" as const,
+    type: "turbo",
     pulseDuration,
     ...(pulseCount && pulseCount > 0 ? { pulseCount } : {})
-  };
+  } as CookidooModeInput;
 }
 
-export function mapOfficialCookidooToInput(recipe: any): CookidooRecipeInput {
+export function mapOfficialCookidooToInput(recipe: unknown): CookidooRecipeInput {
   const ingredients = normalizeOfficialIngredients(recipe);
   const steps = normalizeOfficialSteps(recipe);
-  const servingSizeValue = recipe.servingSize?.quantity?.value
-    ?? recipe.servingSize?.value
-    ?? recipe.yield?.value
-    ?? recipe.recipeYield;
-  const servingUnitText = recipe.servingSize?.unitNotation
-    ?? recipe.servingSize?.unitText
-    ?? recipe.yield?.unitText
-    ?? (typeof recipe.recipeYield === "string" ? recipe.recipeYield.replace(/^\d+\s*/, "") : undefined)
+  const servingSize = getRecord(recipe, "servingSize");
+  const servingSizeValue = getNumber(getRecord(servingSize, "quantity"), "value")
+    ?? getNumber(servingSize, "value")
+    ?? getNumber(getRecord(recipe, "yield"), "value")
+    ?? (isRecord(recipe) ? recipe.recipeYield : undefined);
+  const recipeYield = isRecord(recipe) ? recipe.recipeYield : undefined;
+  const servingUnitText = getString(servingSize, "unitNotation")
+    ?? getString(servingSize, "unitText")
+    ?? getString(getRecord(recipe, "yield"), "unitText")
+    ?? (typeof recipeYield === "string" ? recipeYield.replace(/^\d+\s*/, "") : undefined)
     ?? "Stück";
 
   const parsedIngredients = ingredients.map((ingText: string, idx: number) => ({
@@ -55,10 +63,10 @@ export function mapOfficialCookidooToInput(recipe: any): CookidooRecipeInput {
     text: cleanHtmlText(ingText)
   }));
 
-  const parsedSteps = steps.map((stepObj: any) => {
-    const stepText = cleanHtmlText(typeof stepObj === "string" ? stepObj : stepObj.formattedText || stepObj.text || "");
-    const ingredientAnnotations: any[] = [];
-    const modeAnnotations: any[] = [];
+  const parsedSteps = steps.map((stepObj): CookidooStepInput => {
+    const stepText = cleanHtmlText(typeof stepObj === "string" ? stepObj : getString(stepObj, "formattedText") ?? getString(stepObj, "text") ?? "");
+    const ingredientAnnotations: CookidooIngredientAnnotation[] = [];
+    const modeAnnotations: CookidooModeAnnotation[] = [];
     const intervals: [number, number][] = [];
 
     const hasOverlap = (start: number, end: number) => {
@@ -83,13 +91,13 @@ export function mapOfficialCookidooToInput(recipe: any): CookidooRecipeInput {
           const isVaroma = match.toLowerCase().includes("varoma");
           const durationSec = match.toLowerCase().includes("min") ? parseInt(p1, 10) * 60 : parseInt(p1, 10);
           if (isVaroma) {
-            return { type: "steaming" as const, time: durationSec, speed: p2 as any };
+            return { type: "steaming" as const, time: durationSec, speed: p2 } as CookidooModeInput;
           }
           const speedNum = parseFloat(p2);
           if (speedNum >= 6) {
-            return { type: "blend" as const, time: durationSec, speed: p2 as any };
+            return { type: "blend" as const, time: durationSec, speed: p2 } as CookidooModeInput;
           }
-          return { type: "cook" as const, time: durationSec, temperature: 100, speed: p2 as any };
+          return { type: "cook" as const, time: durationSec, temperature: 100, speed: p2 } as CookidooModeInput;
         }
       },
       {
@@ -163,9 +171,9 @@ export function mapOfficialCookidooToInput(recipe: any): CookidooRecipeInput {
   });
 
   return {
-    title: recipe.name || "Cookidoo Recipe",
-    prepTime: recipe.prepTime ? parseIsoDuration(recipe.prepTime) : 0,
-    totalTime: recipe.totalTime ? parseIsoDuration(recipe.totalTime) : 0,
+    title: getString(recipe, "name") ?? "Cookidoo Recipe",
+    prepTime: getString(recipe, "prepTime") ? parseIsoDuration(getString(recipe, "prepTime") ?? "") : 0,
+    totalTime: getString(recipe, "totalTime") ? parseIsoDuration(getString(recipe, "totalTime") ?? "") : 0,
     servingSize: typeof servingSizeValue === "number" ? servingSizeValue : parseInt(String(servingSizeValue ?? ""), 10) || 1,
     servingUnitText,
     ingredients: parsedIngredients,
@@ -175,85 +183,85 @@ export function mapOfficialCookidooToInput(recipe: any): CookidooRecipeInput {
   };
 }
 
-function normalizeOfficialIngredients(recipe: any): string[] {
-  if (Array.isArray(recipe.recipeIngredient)) {
-    return recipe.recipeIngredient;
+function normalizeOfficialIngredients(recipe: unknown): string[] {
+  const recipeIngredients = getArray(recipe, "recipeIngredient");
+  if (recipeIngredients.length) {
+    return recipeIngredients.filter((ingredient): ingredient is string => typeof ingredient === "string");
   }
-  if (Array.isArray(recipe.recipeIngredientGroups)) {
-    return recipe.recipeIngredientGroups.flatMap((group: any) =>
-      (group.recipeIngredients ?? []).map((ingredient: any) =>
-        [ingredient.quantity?.value, ingredient.unitNotation, ingredient.ingredientNotation, ingredient.preparation]
-          .filter(Boolean)
-          .join(" ")
-          .replace(/\s+,/g, ",")
-      )
-    );
-  }
-  return [];
+  const groups = getArray(recipe, "recipeIngredientGroups");
+  return groups.flatMap((group) =>
+    getArray(group, "recipeIngredients").map((ingredient) =>
+      [getNumber(getRecord(ingredient, "quantity"), "value"), getString(ingredient, "unitNotation"), getString(ingredient, "ingredientNotation"), getString(ingredient, "preparation")]
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+,/g, ",")
+    )
+  );
 }
 
-function normalizeOfficialSteps(recipe: any): any[] {
-  if (Array.isArray(recipe.recipeInstructions)) {
-    return recipe.recipeInstructions;
-  }
-  if (Array.isArray(recipe.recipeStepGroups)) {
-    return recipe.recipeStepGroups.flatMap((group: any) => group.recipeSteps ?? []);
-  }
-  return [];
+function normalizeOfficialSteps(recipe: unknown): unknown[] {
+  const instructions = getArray(recipe, "recipeInstructions");
+  if (instructions.length) return instructions;
+  return getArray(recipe, "recipeStepGroups").flatMap((group) => getArray(group, "recipeSteps"));
 }
 
-export function mapCustomCookidooToInput(recipe: any): CookidooRecipeInput {
-  const content = recipe.recipeContent || {};
-  const ingredients = (content.ingredients || []).map((ing: any, idx: number) => ({
+export function mapCustomCookidooToInput(recipe: unknown): CookidooRecipeInput {
+  const content = getRecord(recipe, "recipeContent") ?? {};
+  const ingredients = getArray(content, "ingredients").map((ing, idx) => ({
     id: `ing-${idx}`,
-    text: ing.text
+    text: getString(ing, "text") ?? ""
   }));
 
   return {
-    title: content.name || "Custom Recipe",
-    prepTime: Math.round((content.prepTime || 0) / 60),
-    totalTime: Math.round((content.totalTime || 0) / 60),
-    servingSize: content.yield?.value || 1,
-    servingUnitText: content.yield?.unitText || "Portionen",
+    title: getString(content, "name") ?? "Custom Recipe",
+    prepTime: Math.round((getNumber(content, "prepTime") ?? 0) / 60),
+    totalTime: Math.round((getNumber(content, "totalTime") ?? 0) / 60),
+    servingSize: getNumber(getRecord(content, "yield"), "value") ?? 1,
+    servingUnitText: getString(getRecord(content, "yield"), "unitText") ?? "Portionen",
     ingredients,
-    steps: (content.instructions || []).map((step: any) => {
-      const stepText = step.text || "";
-      const ingredientAnnotations: any[] = [];
-      const modeAnnotations: any[] = [];
+    steps: getArray(content, "instructions").map((step): CookidooStepInput => {
+      const stepText = getString(step, "text") ?? "";
+      const ingredientAnnotations: CookidooIngredientAnnotation[] = [];
+      const modeAnnotations: CookidooModeAnnotation[] = [];
 
-      if (Array.isArray(step.annotations)) {
-        step.annotations.forEach((ann: any) => {
-          const matchedSubstring = stepText.slice(ann.position.offset, ann.position.offset + ann.position.length);
-          if (ann.type === "INGREDIENT") {
-            const ingText = typeof ann.data.description === "string"
-              ? ann.data.description
-              : ann.data.description?.text || "";
-            const ingIdx = (content.ingredients || []).findIndex((ing: any) => ing.text.toLowerCase().includes(ingText.toLowerCase()));
+      const sourceIngredients = getArray(content, "ingredients");
+      for (const ann of getArray(step, "annotations")) {
+          const position = getRecord(ann, "position");
+          const offset = getNumber(position, "offset") ?? 0;
+          const length = getNumber(position, "length") ?? 0;
+          const matchedSubstring = stepText.slice(offset, offset + length);
+          if (getString(ann, "type") === "INGREDIENT") {
+            const description = getRecord(getRecord(ann, "data"), "description");
+            const rawDescription = isRecord(getRecord(ann, "data")) ? getRecord(ann, "data")?.description : undefined;
+            const ingText = typeof rawDescription === "string"
+              ? rawDescription
+              : getString(description, "text") ?? "";
+            const ingIdx = sourceIngredients.findIndex((ing) => (getString(ing, "text") ?? "").toLowerCase().includes(ingText.toLowerCase()));
             const ingredientId = ingIdx !== -1 ? `ing-${ingIdx}` : `ing-0`;
             ingredientAnnotations.push({
               matchedSubstring,
               ingredientId
             });
-          } else if (ann.type === "MODE") {
-            const modeName = ann.name;
-            const modeData = ann.data || {};
-            let mappedMode: any = null;
+          } else if (getString(ann, "type") === "MODE") {
+            const modeName = getString(ann, "name");
+            const modeData = getRecord(ann, "data") ?? {};
+            let mappedMode: CookidooModeInput | null = null;
             if (modeName === "dough") {
-              mappedMode = { type: "dough", time: modeData.time || 60 };
+              mappedMode = { type: "dough", time: getNumber(modeData, "time") ?? 60 } as CookidooModeInput;
             } else if (modeName === "blend") {
-              mappedMode = { type: "blend", time: modeData.time || 30, speed: modeData.speed || "7" };
+              mappedMode = { type: "blend", time: getNumber(modeData, "time") ?? 30, speed: getString(modeData, "speed") ?? "7" } as CookidooModeInput;
             } else if (modeName === "turbo") {
-              mappedMode = { type: "turbo", pulseDuration: modeData.time || modeData.pulseDuration || 2, pulseCount: modeData.pulseCount };
+              mappedMode = { type: "turbo", pulseDuration: getNumber(modeData, "time") ?? getNumber(modeData, "pulseDuration") ?? 2, pulseCount: getNumber(modeData, "pulseCount") } as CookidooModeInput;
             } else if (modeName === "warm_up" || modeName === "warmUp") {
-              mappedMode = { type: "warmUp", temperature: Number(modeData.temperature?.value ?? 37), speed: modeData.speed || "1" };
+              mappedMode = { type: "warmUp", temperature: Number(getString(getRecord(modeData, "temperature"), "value") ?? 37), speed: getString(modeData, "speed") ?? "1" } as CookidooModeInput;
             } else if (modeName === "cook") {
-              mappedMode = { type: "cook", time: modeData.time || 60, temperature: Number(modeData.temperature?.value ?? 100), speed: modeData.speed || "1" };
+              mappedMode = { type: "cook", time: getNumber(modeData, "time") ?? 60, temperature: Number(getString(getRecord(modeData, "temperature"), "value") ?? 100), speed: getString(modeData, "speed") ?? "1" } as CookidooModeInput;
             } else if (modeName === "rice_cooker" || modeName === "riceCooker") {
-              mappedMode = { type: "riceCooker" };
+              mappedMode = { type: "riceCooker" } as CookidooModeInput;
             } else if (modeName === "steaming") {
-              mappedMode = { type: "steaming", time: modeData.time || 60, speed: modeData.speed || "1", accessory: modeData.accessory || "Varoma" };
+              mappedMode = { type: "steaming", time: getNumber(modeData, "time") ?? 60, speed: getString(modeData, "speed") ?? "1", accessory: getString(modeData, "accessory") ?? "Varoma" } as CookidooModeInput;
             } else if (modeName === "browning") {
-              mappedMode = { type: "browning", time: modeData.time || 60, temperature: Number(modeData.temperature?.value ?? 140) };
+              mappedMode = { type: "browning", time: getNumber(modeData, "time") ?? 60, temperature: Number(getString(getRecord(modeData, "temperature"), "value") ?? 140) } as CookidooModeInput;
             }
             if (mappedMode) {
               modeAnnotations.push({
@@ -262,7 +270,6 @@ export function mapCustomCookidooToInput(recipe: any): CookidooRecipeInput {
               });
             }
           }
-        });
       }
       return {
         text: stepText,
@@ -270,7 +277,7 @@ export function mapCustomCookidooToInput(recipe: any): CookidooRecipeInput {
         modeAnnotations
       };
     }),
-    hints: formatCookidooHints(content.hints),
+    hints: formatCookidooHints(isRecord(content) ? content.hints : undefined),
     settings: { locale: "de-DE" }
   };
 }
@@ -282,8 +289,8 @@ function formatCookidooHints(hints: unknown): string {
     .map((hint) => {
       if (typeof hint === "string") return hint;
       if (hint && typeof hint === "object") {
-        const content = (hint as any).content ?? (hint as any).text;
-        return typeof content === "string" ? cleanHtmlText(content) : "";
+        const content = getString(hint, "content") ?? getString(hint, "text");
+        return content ? cleanHtmlText(content) : "";
       }
       return "";
     })

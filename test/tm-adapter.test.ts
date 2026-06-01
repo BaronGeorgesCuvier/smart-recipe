@@ -60,7 +60,7 @@ describe("ThermomixAdapter", () => {
         ingredients: [
           { id: "  mehl  ", text: "  100g flour " },
           { id: "zucker", text: " 50g sugar" }
-        ] as any,
+        ] as unknown as never,
         steps: [
           {
             text: " Put flour and sugar.  ",
@@ -88,7 +88,7 @@ describe("ThermomixAdapter", () => {
     it("omits tools array parameter in metadata updates", () => {
       const payload = adapter.createPayload(sampleInput);
       expect(payload.meta).toBeDefined();
-      expect((payload.meta as any).tools).toBeUndefined();
+      expect((payload.meta as { tools?: unknown }).tools).toBeUndefined();
       expect(payload.meta.name).toBe("Test Recipe");
       expect(payload.meta.prepTime).toBe(600); // 10 minutes to seconds
     });
@@ -190,10 +190,10 @@ describe("ThermomixAdapter", () => {
       const payload = adapter.createPayload(inputSteaming);
       const annotation = payload.instructions[0].annotations![0];
       expect(annotation.name).toBe("steaming");
-      expect((annotation.data as any).temperature).toBeUndefined();
+      expect((annotation.data as { temperature?: unknown }).temperature).toBeUndefined();
       expect(annotation.data.time).toBe(900);
       expect(annotation.data.speed).toBe("1");
-      expect((annotation.data as any).accessory).toBe("Varoma");
+      expect((annotation.data as { accessory?: unknown }).accessory).toBe("Varoma");
     });
 
     it("maps Gareinsatz and both steaming accessories to SimmeringBasket and VaromaAndSimmeringBasket", () => {
@@ -209,7 +209,7 @@ describe("ThermomixAdapter", () => {
                   type: "steaming",
                   time: 600,
                   speed: "1",
-                  accessory: "Gareinsatz" as any
+                  accessory: "Gareinsatz" as never
                 }
               }
             ]
@@ -228,7 +228,7 @@ describe("ThermomixAdapter", () => {
                   type: "steaming",
                   time: 600,
                   speed: "1",
-                  accessory: "both" as any
+                  accessory: "both" as never
                 }
               }
             ]
@@ -238,11 +238,11 @@ describe("ThermomixAdapter", () => {
 
       const payloadGareinsatz = adapter.createPayload(inputGareinsatz);
       const annotationGareinsatz = payloadGareinsatz.instructions[0].annotations![0];
-      expect((annotationGareinsatz.data as any).accessory).toBe("SimmeringBasket");
+      expect((annotationGareinsatz.data as { accessory?: unknown }).accessory).toBe("SimmeringBasket");
 
       const payloadBoth = adapter.createPayload(inputBoth);
       const annotationBoth = payloadBoth.instructions[0].annotations![0];
-      expect((annotationBoth.data as any).accessory).toBe("VaromaAndSimmeringBasket");
+      expect((annotationBoth.data as { accessory?: unknown }).accessory).toBe("VaromaAndSimmeringBasket");
     });
 
     it("enforces browning mode constraints: clamps temperature and omits power", () => {
@@ -257,8 +257,8 @@ describe("ThermomixAdapter", () => {
                 mode: {
                   type: "browning",
                   time: 300,
-                  temperature: 142 as any,
-                  power: "Intensive" as any
+                  temperature: 142 as never,
+                  power: "Intensive" as never
                 }
               }
             ]
@@ -271,7 +271,7 @@ describe("ThermomixAdapter", () => {
                 mode: {
                   type: "browning",
                   time: 300,
-                  temperature: 158 as any
+                  temperature: 158 as never
                 }
               }
             ]
@@ -678,7 +678,10 @@ describe("ThermomixAdapter", () => {
       );
 
       // Verify metadata patch has the image property
-      const patchCall = mockRequest.mock.calls.find((call: any) => call[0]?.method === "PATCH" && call[0]?.body?.name);
+      const patchCall = mockRequest.mock.calls.find((call) => {
+        const body = call[0]?.body as { name?: string } | undefined;
+        return call[0]?.method === "PATCH" && body?.name;
+      });
       expect(patchCall).toBeDefined();
       expect(patchCall![0].body).toEqual(
         expect.objectContaining({
@@ -714,8 +717,8 @@ describe("ThermomixAdapter", () => {
       });
 
       expect(result.signature).toBe("nested-sig-123");
-      const [, init] = (fetchImpl as any).mock.calls[0];
-      expect(JSON.parse(init.body)).toEqual(
+      const [, init] = (fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls[0];
+      expect(JSON.parse(String(init.body))).toEqual(
         expect.objectContaining({
           custom_coordinates: "0,0,1024,1024",
           source: "uw",
@@ -799,9 +802,11 @@ describe("ThermomixAdapter", () => {
         cookieNames: ["_oauth2_proxy", "cidaas_sid", "v-authenticated", "v-is-authenticated"],
       });
 
-      const [, postInit] = (fetchImpl as any).mock.calls.find(([url, init]: [string, RequestInit]) =>
+      const postCall = (fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls.find(([url, init]) =>
         String(url) === "https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login" && init?.method === "POST"
       );
+      expect(postCall).toBeDefined();
+      const [, postInit] = postCall!;
       expect(String(postInit.body)).toBe("requestId=request-123&username=cook%40example.test&password=secret");
       expect(new Headers(postInit.headers).get("Referer")).toBe("https://eu.login.vorwerk.com/ciam/login?requestId=request-from-url&view_type=login");
     });

@@ -3,8 +3,9 @@ import { AuthFlowError, MonsieurCuisineApiError } from "../mc/errors.js";
 import { CookidooError } from "../devices/tm/errors.js";
 import type { importRecipeFromUrl } from "../pipeline/import-url.js";
 import { colorCyan, colorDim } from "./terminal.js";
+import { getString, isRecord } from "../utils/unknown.js";
 
-export function printOutput(value: any, isJson: boolean, customFormat?: (val: any) => string): void {
+export function printOutput<T>(value: T, isJson: boolean, customFormat?: (val: T) => string): void {
   if (isJson) {
     console.log(JSON.stringify(value, null, 2));
     return;
@@ -18,8 +19,8 @@ export function printOutput(value: any, isJson: boolean, customFormat?: (val: an
 
 export function printSuggestedCommand(
   cmdArgs: string[] | undefined,
-  options: any,
-  programOpts: any,
+  options: Record<string, unknown>,
+  programOpts: Record<string, unknown>,
   targetDevice: string,
   imageMode: string | null,
   shouldUpload: boolean,
@@ -80,16 +81,16 @@ export function summarizeImportResult(result: Awaited<ReturnType<typeof importRe
   if (draft) {
     return {
       id: draft.id,
-      title: draft.title ?? result.recipeInput.title,
+      title: draft.title ?? getString(result.recipeInput, "title"),
       status: draft.status,
       recipeUrl: result.recipeUrl,
       image: result.uploadedImage,
-      imageSource: result.recipeImage?.source
+      imageSource: isRecord(result.recipeImage) ? result.recipeImage.source : undefined
     };
   }
 
   return {
-    title: result.recipeInput.title,
+    title: getString(result.recipeInput, "title"),
     recipeInput: result.recipeInput,
     payload: result.payload
   };

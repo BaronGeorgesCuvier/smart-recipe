@@ -1,6 +1,8 @@
 import process from "node:process";
 import { upsertDotEnvValue } from "../config/env.js";
-import { CookieAuthProvider } from "../mc/auth.js";
+import { CookieAuthProvider, type AuthProvider } from "../mc/auth.js";
+import type { DeviceAdapter } from "../devices/adapter.js";
+import type { SupportedLocale } from "../catalogs/types.js";
 import { confirm, input, password as passwordPrompt, select } from "./prompts.js";
 import {
   blankLine,
@@ -21,12 +23,20 @@ interface CapturedSession {
   cookieNames?: string[];
 }
 
+type CliAuthAdapter = DeviceAdapter & {
+  passwordLogin?: (options: { locale?: string; credentials: { email: string; password: string } }) => Promise<CapturedSession>;
+};
+
+function envLocale(key: string): SupportedLocale {
+  return (process.env[key] ?? "de-DE") as SupportedLocale;
+}
+
 export async function resolveAuthInteractively(
   options: { cookie?: string },
   isInteractive: boolean,
-  adapter: any,
+  adapter: CliAuthAdapter,
   configPath: string
-): Promise<any> {
+): Promise<AuthProvider> {
   const cookieKey = adapter.id === "tm" ? "TM_COOKIE" : "MC_COOKIE";
   const currentCookie = options.cookie ?? process.env[cookieKey];
 
@@ -88,10 +98,10 @@ export async function resolveAuthInteractively(
 }
 
 async function tryPasswordLogin(
-  adapter: any,
+  adapter: CliAuthAdapter,
   configPath: string,
   options: { promptForMissing: boolean }
-): Promise<any | null> {
+): Promise<AuthProvider | null> {
   if (adapter.id !== "tm" || typeof adapter.passwordLogin !== "function") return null;
 
   let email = process.env.TM_LOGIN;
@@ -115,13 +125,15 @@ async function tryPasswordLogin(
   }
   if (!email || !password) return null;
 
-  const locale = (process.env.TM_LOCALE ?? "de-DE") as any;
+  const locale = envLocale("TM_LOCALE");
   try {
+    const passwordLogin = adapter.passwordLogin;
+    if (!passwordLogin) return null;
     const spinnerEnabled = options.promptForMissing && Boolean(process.stderr.isTTY);
     const result = await withCliSpinner<CapturedSession>(
       "Signing in to Cookidoo...",
       spinnerEnabled,
-      () => adapter.passwordLogin({
+      () => passwordLogin({
         locale,
         credentials: { email, password },
       }),
@@ -142,10 +154,10 @@ async function tryPasswordLogin(
   }
 }
 
-async function trySilentSessionRefresh(adapter: any, configPath: string): Promise<any | null> {
+async function trySilentSessionRefresh(adapter: CliAuthAdapter, configPath: string): Promise<AuthProvider | null> {
   if (adapter.id !== "tm") return null;
 
-  const locale = (process.env.TM_LOCALE ?? "de-DE") as any;
+  const locale = envLocale("TM_LOCALE");
   try {
     const spinnerEnabled = Boolean(process.stderr.isTTY);
     const result = await withCliSpinner<CapturedSession>(
@@ -175,16 +187,16 @@ async function trySilentSessionRefresh(adapter: any, configPath: string): Promis
 
 export async function attemptBrowserLogin(
   isInteractive: boolean,
-  adapter: any,
+  adapter: CliAuthAdapter,
   configPath: string
-): Promise<any> {
+): Promise<AuthProvider> {
   const isTm = adapter.id === "tm";
   const localeKey = isTm ? "TM_LOCALE" : "MC_LOCALE";
   const cookieKey = isTm ? "TM_COOKIE" : "MC_COOKIE";
   const loginKey = isTm ? "TM_LOGIN" : "MC_LOGIN";
   const pwKey = isTm ? "TM_PW" : "MC_PW";
 
-  const locale = (process.env[localeKey] ?? "de-DE") as any;
+  const locale = envLocale(localeKey);
   blankLine();
   const spinnerEnabled = isInteractive && Boolean(process.stderr.isTTY);
   const result = await withCliSpinner<CapturedSession>(
@@ -220,7 +232,7 @@ export async function attemptBrowserLogin(
   return createAuthProvider(adapter, result.cookie);
 }
 
-export async function promptForManualCookie(adapter: any, configPath: string): Promise<any> {
+export async function promptForManualCookie(adapter: CliAuthAdapter, configPath: string): Promise<AuthProvider> {
   const isTm = adapter.id === "tm";
   const cookieKey = isTm ? "TM_COOKIE" : "MC_COOKIE";
 
@@ -257,7 +269,7 @@ export async function promptForManualCookie(adapter: any, configPath: string): P
   return createAuthProvider(adapter, cookie.trim());
 }
 
-function makeSilentBrowserAuthProvider(adapter: any, configPath: string): any {
+function makeSilentBrowserAuthProvider(adapter: CliAuthAdapter, configPath: string): AuthProvider {
   const isTm = adapter.id === "tm";
   const localeKey = isTm ? "TM_LOCALE" : "MC_LOCALE";
   const cookieKey = isTm ? "TM_COOKIE" : "MC_COOKIE";
@@ -266,7 +278,7 @@ function makeSilentBrowserAuthProvider(adapter: any, configPath: string): any {
 
   return {
     async getSession() {
-      const locale = (process.env[localeKey] ?? "de-DE") as any;
+      const locale = envLocale(localeKey);
       if (isTm && typeof adapter.passwordLogin === "function" && process.env.TM_LOGIN && process.env.TM_PW) {
         printStatus(`No ${adapter.deviceName} cookie found. Signing in without browser...`);
         const result = await adapter.passwordLogin({
@@ -275,7 +287,7 @@ function makeSilentBrowserAuthProvider(adapter: any, configPath: string): any {
         });
         upsertDotEnvValue(configPath, cookieKey, result.cookie);
         printStatus(`Saved ${cookieKey} to ${configPath}.`);
-        return { cookie: result.cookie, source: result.source };
+        return { cookie: result.cookie, source: "cookie" };
       }
 
       printStatus(`No ${adapter.deviceName} cookie found. Opening login window...`);
@@ -289,7 +301,7 @@ function makeSilentBrowserAuthProvider(adapter: any, configPath: string): any {
       });
       upsertDotEnvValue(configPath, cookieKey, result.cookie);
       printStatus(`Saved ${cookieKey} to ${configPath}.`);
-      return { cookie: result.cookie, source: result.source };
+      return { cookie: result.cookie, source: "cookie" };
     }
   };
 }
@@ -326,11 +338,11 @@ async function maybeSaveSessionCookie(
   }
 }
 
-function createAuthProvider(adapter: any, cookie: string): any {
+function createAuthProvider(adapter: CliAuthAdapter, cookie: string): AuthProvider {
   if (adapter.id === "tm") {
     return {
       async getSession() {
-        return { cookie };
+        return { cookie, source: "cookie" };
       }
     };
   }

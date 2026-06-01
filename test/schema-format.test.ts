@@ -5,7 +5,7 @@ import { RecipeInputSchema } from "../src/recipes/schema.js";
 describe("OpenAI strict schema formatting", () => {
   it("keeps mode unions nested under an object root", () => {
     const schema = makeOpenAIStrictSchema(RecipeInputSchema);
-    const stepsItems = (schema.properties as any).servingSize.properties.steps.items;
+    const stepsItems = (schema.properties as { servingSize: { properties: { steps: { items: { anyOf: Array<{ properties: { mode: { anyOf: Array<{ properties?: { type?: { enum?: string[] } } }> } } }> } } } } }).servingSize.properties.steps.items;
     const mode0 = stepsItems.anyOf[0].properties.mode;
     const mode1 = stepsItems.anyOf[1].properties.mode;
 
@@ -21,12 +21,12 @@ describe("OpenAI strict schema formatting", () => {
     const values: unknown[] = [];
     collectKeys(schema, "const", values);
 
-    const stepsItems = (schema.properties as any).servingSize.properties.steps.items;
+    const stepsItems = (schema.properties as { servingSize: { properties: { steps: { items: { anyOf: Array<{ properties: { mode: { anyOf: Array<{ properties?: { type?: { enum?: string[] } } }> } } }> } } } } }).servingSize.properties.steps.items;
     const mode1 = stepsItems.anyOf[1].properties.mode;
-    const manualCooking = mode1.anyOf.find((variant: any) => variant.properties?.type?.enum?.[0] === "manualCooking");
+    const manualCooking = mode1.anyOf.find((variant: { properties?: { type?: { enum?: string[] } } }) => variant.properties?.type?.enum?.[0] === "manualCooking");
 
     expect(values).toEqual([]);
-    expect(manualCooking.properties.type).toEqual({ type: "string", enum: ["manualCooking"] });
+    expect(manualCooking!.properties!.type).toEqual({ type: "string", enum: ["manualCooking"] });
   });
 });
 

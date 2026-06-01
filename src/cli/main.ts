@@ -3,7 +3,7 @@ import process from "node:process";
 import os from "node:os";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import { Command, Help } from "commander";
+import { Command, Help, Option } from "commander";
 import fs from "node:fs";
 import { loadDotEnv, upsertDotEnvValue, getTmVersion, getTmLocale, mcHasFoodProcessor } from "../config/env.js";
 import { categoryPromptText, plannedLocales, supportedLocales } from "../catalogs/index.js";
@@ -35,7 +35,7 @@ import {
   formatUserForTerminal
 } from "./formatters.js";
 export { formatDraftsForTerminal, formatUserForTerminal } from "./formatters.js";
-import { marked } from "marked";
+import { marked, type MarkedExtension } from "marked";
 import { markedTerminal } from "marked-terminal";
 import { detectRecipeSource, fetchRecipeSourceAsPage, fetchRecipeSourceWithRaw, type RecipeSource } from "../sources/index.js";
 import { confirm, input, password as passwordPrompt } from "./prompts.js";
@@ -66,9 +66,31 @@ import {
   summarizeImportResult
 } from "./output.js";
 import { withCliSpinner } from "./spinner.js";
+import { getArray, getNumber, getRecord, getString, isRecord } from "../utils/unknown.js";
+import type { PromptModeType } from "../recipes/types.js";
+import type { SupportedLocale } from "../catalogs/types.js";
 
-function detectDeviceFromRecipe(json: any): "mc" | "tm" {
-  if (json && (typeof json.servingSize === "number" || Array.isArray(json.steps))) {
+
+interface DoctorReport {
+  device: "mc" | "tm";
+  deviceName: string;
+  configPath: string;
+  localEnvPath: string;
+  localEnvExists: boolean;
+  openAiKeyPresent: boolean;
+  cookie: { key: string; present: boolean };
+  auth: { checked: boolean; ok: boolean; userId?: unknown; message?: string };
+  recommendations: string[];
+  tm?: { locale: string; version: string };
+  mc?: { foodProcessor: boolean };
+}
+
+type AdapterWithPasswordLogin = ReturnType<typeof getDeviceAdapter> & {
+  passwordLogin?: (options: { locale?: string; credentials: { email: string; password: string } }) => Promise<{ cookie: string; source?: string }>;
+};
+
+function detectDeviceFromRecipe(json: unknown): "mc" | "tm" {
+  if (isRecord(json) && (typeof json.servingSize === "number" || Array.isArray(json.steps))) {
     return "tm";
   }
   return "mc";
@@ -78,18 +100,17 @@ function hasExplicitLogLevel(): boolean {
   return Boolean(process.env.LOG_LEVEL) || process.argv.some((arg) => arg === "--log-level" || arg.startsWith("--log-level="));
 }
 
-function effectiveCliLogLevel(programOpts: any, isInteractive: boolean): LogLevel {
+function effectiveCliLogLevel(programOpts: Record<string, unknown>, isInteractive: boolean): LogLevel {
   if (isInteractive && !hasExplicitLogLevel()) return "silent";
-  return programOpts.logLevel as LogLevel;
+  return (programOpts.logLevel ?? "info") as LogLevel;
 }
 
-function useCliSpinner(programOpts: any, isInteractive: boolean): boolean {
+function useCliSpinner(programOpts: Record<string, unknown>, isInteractive: boolean): boolean {
   return isInteractive && effectiveCliLogLevel(programOpts, isInteractive) === "silent";
 }
 
-// @types/marked-terminal is outdated and doesn't know that markedTerminal() now returns a MarkedExtension.
-// We cast it to `any` to bypass the type error until the DefinitelyTyped package is updated.
-marked.use(markedTerminal() as any);
+// @types/marked-terminal is outdated and does not know that markedTerminal() now returns a MarkedExtension.
+marked.use(markedTerminal() as MarkedExtension);
 
 const GLOBAL_ENV_PATH = path.join(os.homedir(), ".smart-recipe");
 loadDotEnv(GLOBAL_ENV_PATH, { override: false });
@@ -176,7 +197,7 @@ class GroupedHelp extends Help {
 
     const visibleOptions = helper.visibleOptions(cmd);
     if (visibleOptions.length > 0) {
-      const categories: Record<string, any[]> = {};
+      const categories: Record<string, Option[]> = {};
       const order = [
         "Global Settings",
         "General / Import Workflow Options",
@@ -370,8 +391,8 @@ program.commands.at(-1)!.action(async (options) => {
 
 async function runImport(
   page: RetrievedRecipePage,
-  options: any,
-  programOpts: any,
+  options: Record<string, unknown>,
+  programOpts: Record<string, unknown>,
   cmdArgs?: string[]
 ) {
   const isJsonMode = Boolean(programOpts.json);
@@ -386,7 +407,7 @@ async function runImport(
   });
 
   if (options.mcFoodProcessor) {
-    process.env.MC_HAS_FOOD_PROCESSOR = options.mcFoodProcessor.toLowerCase();
+    process.env.MC_HAS_FOOD_PROCESSOR = String(options.mcFoodProcessor).toLowerCase();
   }
 
   const targetDeviceResult = await resolveTargetDeviceSettings(options, isInteractive, GLOBAL_ENV_PATH);
@@ -410,9 +431,9 @@ async function runImport(
     () => generateSmartRecipe({
       page,
       locale: targetLocale,
-      openAIModel: options.model,
-      reasoningEffort: options.reasoning as ReasoningEffort,
-      excludeModes: excludeModes.length > 0 ? (excludeModes as any) : undefined,
+      openAIModel: typeof options.model === "string" ? options.model : undefined,
+      reasoningEffort: typeof options.reasoning === "string" ? options.reasoning as ReasoningEffort : undefined,
+      excludeModes: excludeModes.length > 0 ? (excludeModes as PromptModeType[]) : undefined,
       logger,
       adapter
     }),
@@ -438,7 +459,7 @@ async function runImport(
       blankLine();
     }
     printOutput(
-      { title: generated.recipeInput.title, recipeInput: generated.recipeInput, payload: generated.payload },
+      { title: getString(generated.recipeInput, "title"), recipeInput: generated.recipeInput, payload: generated.payload },
       isJsonMode,
       options.fullResponse ? () => JSON.stringify(generated, null, 2) : undefined
     );
@@ -463,7 +484,7 @@ async function runImport(
       page: generated.page,
       recipeInput: generated.recipeInput,
       locale: targetLocale,
-      cookie: activeCookie,
+      cookie: typeof activeCookie === "string" ? activeCookie : undefined,
       authProvider,
       imageProvider,
       logger,
@@ -476,7 +497,7 @@ async function runImport(
           error.code === 110002 ||
           (error.response &&
             typeof error.response === "object" &&
-            (error.response as any).message === "ExpiredAuthCookieException"))) ||
+            getString(error.response, "message") === "ExpiredAuthCookieException"))) ||
       (error instanceof CookidooError &&
         (error.status === 401 || error.status === 403));
 
@@ -530,21 +551,29 @@ async function runImport(
     (v) => {
       if (options.fullResponse) return JSON.stringify(v, null, 2);
       const parts: string[] = [];
-      if (v.recipeUrl) {
-        parts.push(`\n  \x1b[1m\x1b[32m✓ Recipe uploaded successfully!\x1b[0m`);
-        parts.push(`  \x1b[36m${v.recipeUrl}\x1b[0m`);
+      const recipeUrl = getString(v, "recipeUrl");
+      if (recipeUrl) {
+        parts.push(`
+  [1m[32m✓ Recipe uploaded successfully![0m`);
+        parts.push(`  [36m${recipeUrl}[0m`);
       } else {
-        parts.push(`\n  \x1b[1m\x1b[32m✓ Draft created:\x1b[0m ${v.title}`);
-        if (v.id) parts.push(`  Draft ID: ${v.id} (${v.status})`);
+        parts.push(`
+  [1m[32m✓ Draft created:[0m ${getString(v, "title") ?? ""}`);
+        const id = getString(v, "id");
+        if (id) parts.push(`  Draft ID: ${id} (${getString(v, "status") ?? ""})`);
       }
-      if (v.image) {
-        if (typeof v.image.detailsMediaId !== "undefined") {
-          parts.push(`  Image Media ID: ${v.image.detailsMediaId}`);
-        } else if (v.image.public_id) {
-          parts.push(`  Image Public ID: ${v.image.public_id} (${v.image.format})`);
+      const image = getRecord(v, "image");
+      if (image) {
+        const detailsMediaId = getNumber(image, "detailsMediaId");
+        const publicId = getString(image, "public_id");
+        if (typeof detailsMediaId !== "undefined") {
+          parts.push(`  Image Media ID: ${detailsMediaId}`);
+        } else if (publicId) {
+          parts.push(`  Image Public ID: ${publicId} (${getString(image, "format") ?? ""})`);
         }
       }
-      if (v.imageSource) parts.push(`  Image Source: ${v.imageSource}`);
+      const imageSource = getString(v, "imageSource");
+      if (imageSource) parts.push(`  Image Source: ${imageSource}`);
       return parts.join("\n");
     }
   );
@@ -564,12 +593,12 @@ function isInteractiveCli(): boolean {
   return !Boolean(program.optsWithGlobals().json) && process.stdout.isTTY && process.stdin.isTTY;
 }
 
-async function resolveCommandDevice(options: any): Promise<"mc" | "tm"> {
+async function resolveCommandDevice(options: Record<string, unknown>): Promise<"mc" | "tm"> {
   return await getOrPromptDevice(options, isInteractiveCli(), GLOBAL_ENV_PATH);
 }
 
-function isSourceAuthError(source: RecipeSource, error: any): boolean {
-  const message = error?.message || String(error);
+function isSourceAuthError(source: RecipeSource, error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
 
   if (/source ingestion requires .* cookie/i.test(message)) return true;
 
@@ -579,7 +608,7 @@ function isSourceAuthError(source: RecipeSource, error: any): boolean {
       (error.status === 401 ||
         error.status === 403 ||
         error.code === 110002 ||
-        Boolean(error.response && typeof error.response === "object" && (error.response as any).message === "ExpiredAuthCookieException"))
+        Boolean(error.response && typeof error.response === "object" && getString(error.response, "message") === "ExpiredAuthCookieException"))
     );
   }
 
@@ -590,7 +619,7 @@ function isSourceAuthError(source: RecipeSource, error: any): boolean {
   return false;
 }
 
-function requireCookieForDevice(device: "mc" | "tm", options: any): string {
+function requireCookieForDevice(device: "mc" | "tm", options: Record<string, unknown>): string {
   const adapter = getDeviceAdapter(device);
   const cookie = activeCookieForDevice(device, options);
   if (!cookie) {
@@ -600,11 +629,11 @@ function requireCookieForDevice(device: "mc" | "tm", options: any): string {
   return cookie;
 }
 
-async function resolveCookieForDevice(device: "mc" | "tm", options: any): Promise<string> {
+async function resolveCookieForDevice(device: "mc" | "tm", options: Record<string, unknown>): Promise<string> {
   const existingCookie = activeCookieForDevice(device, options);
   if (existingCookie) return existingCookie;
 
-  const adapter = getDeviceAdapter(device) as any;
+  const adapter = getDeviceAdapter(device) as AdapterWithPasswordLogin;
   if (device === "tm" && typeof adapter.passwordLogin === "function") {
     let email = process.env.TM_LOGIN;
     let cookidooPassword = process.env.TM_PW;
@@ -669,11 +698,11 @@ function browserSandboxFromEnv(): boolean | undefined {
   return /^(1|true|yes|on)$/i.test(raw);
 }
 
-async function buildDoctorReport(device: "mc" | "tm", options: any) {
+async function buildDoctorReport(device: "mc" | "tm", options: Record<string, unknown>) {
   const adapter = getDeviceAdapter(device);
   const cookieKey = cookieKeyForDevice(device);
   const cookie = activeCookieForDevice(device, options);
-  const report: any = {
+  const report: DoctorReport = {
     device,
     deviceName: adapter.deviceName,
     configPath: GLOBAL_ENV_PATH,
@@ -713,9 +742,9 @@ async function buildDoctorReport(device: "mc" | "tm", options: any) {
       const user = await adapter.getCurrentUser(cookie);
       report.auth.ok = true;
       report.auth.userId = user && typeof user === "object" && "id" in user ? user.id : undefined;
-    } catch (error: any) {
+    } catch (error: unknown) {
       report.auth.ok = false;
-      report.auth.message = error?.message || String(error);
+      report.auth.message = error instanceof Error ? error.message : String(error);
       report.recommendations.push(`Refresh the session with smart-recipe login-browser --device ${device} --save.`);
     }
   }
@@ -723,40 +752,41 @@ async function buildDoctorReport(device: "mc" | "tm", options: any) {
   return report;
 }
 
-async function listRecipesCommand(options: any) {
+async function listRecipesCommand(options: Record<string, unknown>) {
   const device = await resolveCommandDevice(options);
   const adapter = getDeviceAdapter(device);
   const activeCookie = await resolveCookieForDevice(device, options);
   const size = Number(options.limit ?? options.size ?? 20);
-  const result = await adapter.listDrafts({ cookie: activeCookie, size }) as any;
+  const result = await adapter.listDrafts({ cookie: activeCookie, size });
 
-  let recipes: any[] = [];
+  let recipes: unknown[] = [];
   let total = 0;
   let totalPage = 1;
 
-  recipes = result?.data?.recipes ?? [];
-  total = result?.data?.total ?? recipes.length;
-  totalPage = result?.data?.totalPage ?? 1;
+  const data = getRecord(result, "data");
+  recipes = getArray(data, "recipes");
+  total = getNumber(data, "total") ?? recipes.length;
+  totalPage = getNumber(data, "totalPage") ?? 1;
 
   if (options.search) {
     const query = String(options.search).toLowerCase();
-    recipes = recipes.filter((recipe: any) =>
-      String(recipe.title ?? "").toLowerCase().includes(query) ||
-      String(recipe.id ?? "").toLowerCase().includes(query)
+    recipes = recipes.filter((recipe) =>
+      String(getString(recipe, "title") ?? "").toLowerCase().includes(query) ||
+      String(getString(recipe, "id") ?? "").toLowerCase().includes(query)
     );
   }
 
-  const formattedRecipes = recipes.map((recipe: any) => ({
-      id: recipe.id,
-      title: recipe.title,
-      status: recipe.status,
-      updatedAt: recipe.updatedAt,
-      deviceTypes: recipe.deviceTypes,
-      ingredientCount: recipe.ingredientCount,
-      stepCount: recipe.stepCount,
-      hasImage: recipe.hasImage,
-      hasHints: recipe.hasHints,
-      recipeUrl: recipe.recipeUrl
+  const formattedRecipes = recipes.map((recipe) => ({
+      id: getString(recipe, "id"),
+      title: getString(recipe, "title"),
+      status: getString(recipe, "status"),
+      updatedAt: getString(recipe, "updatedAt"),
+      deviceTypes: getArray(recipe, "deviceTypes"),
+      ingredientCount: getNumber(recipe, "ingredientCount"),
+      stepCount: getNumber(recipe, "stepCount"),
+      hasImage: Boolean(isRecord(recipe) ? recipe.hasImage : false),
+      hasHints: Boolean(isRecord(recipe) ? recipe.hasHints : false),
+      recipeUrl: getString(recipe, "recipeUrl")
     }));
 
   printOutput({
@@ -792,7 +822,7 @@ program
     const loginKey = adapter.id === "tm" ? "TM_LOGIN" : "MC_LOGIN";
     const pwKey = adapter.id === "tm" ? "TM_PW" : "MC_PW";
 
-    const locale = (process.env[localeKey] ?? "de-DE") as any;
+    const locale = (process.env[localeKey] ?? "de-DE") as SupportedLocale;
     const credentials = (options.email || process.env[loginKey]) ? {
       email: options.email ?? process.env[loginKey]!,
       password: options.password ?? process.env[pwKey]
@@ -804,17 +834,16 @@ program
       spinnerEnabled,
       (spinner) => adapter.browserLogin({
         locale,
-        userDataDir: options.profileDir,
-        startUrl: options.startUrl,
-        timeoutMs: Number(options.timeout) * 1000,
-        keepOpen: options.keepOpen,
-        installBrowsers: options.installBrowser,
-        browserChannel: options.browserChannel ?? process.env.SMART_RECIPE_BROWSER_CHANNEL,
-        browserPath: options.browserPath ?? process.env.SMART_RECIPE_BROWSER_PATH,
+        userDataDir: typeof options.profileDir === "string" ? options.profileDir : undefined,
+        timeoutMs: Number(options.timeout ?? 300) * 1000,
+        keepOpen: Boolean(options.keepOpen),
+        installBrowsers: Boolean(options.installBrowser),
+        browserChannel: typeof options.browserChannel === "string" ? options.browserChannel : process.env.SMART_RECIPE_BROWSER_CHANNEL,
+        browserPath: typeof options.browserPath === "string" ? options.browserPath : process.env.SMART_RECIPE_BROWSER_PATH,
         browserSandbox: options.disableBrowserSandbox ? false : browserSandboxFromEnv(),
         credentials,
         onStatus: spinnerEnabled ? (message: string) => spinner.update(message) : printStatus
-      } as any),
+      }),
       {
         successMessage: `Captured ${adapter.deviceName} session.`,
         failureMessage: `${adapter.deviceName} browser login failed.`,
@@ -882,7 +911,7 @@ program
             browserPath: process.env.SMART_RECIPE_BROWSER_PATH,
             browserSandbox: browserSandboxFromEnv(),
             onStatus: spinnerEnabled ? (message: string) => spinner.update(message) : printStatus,
-          } as any),
+          }),
           {
             successMessage: `Captured ${adapter.deviceName} session.`,
             failureMessage: `${adapter.deviceName} browser login failed.`,
@@ -919,9 +948,10 @@ program
       const parts = [`\n# ${v.title}`, `URL: ${v.url}`, `\n## Markdown Extract\n\n${marked.parse(v.markdown)}`];
       if (v.images && v.images.length > 0) {
         parts.push(`\n## Images\n`);
-        v.images.forEach((img: any, i: number) => {
-          parts.push(`  [${i + 1}] ${img.url} (Score: ${img.score})`);
-          if (img.reason) parts.push(`      Reason: ${img.reason}`);
+        v.images.forEach((img: unknown, i: number) => {
+          parts.push(`  [${i + 1}] ${getString(img, "url") ?? ""} (Score: ${getNumber(img, "score") ?? ""})`);
+          const reason = getString(img, "reason");
+          if (reason) parts.push(`      Reason: ${reason}`);
         });
       }
       return parts.join("\n");
@@ -964,7 +994,7 @@ program
   .option("--mc-food-processor <boolean>", "Whether you own the Monsieur Cuisine food processor attachment (true/false)")
   .action(async (options) => {
     if (options.mcFoodProcessor) {
-      process.env.MC_HAS_FOOD_PROCESSOR = options.mcFoodProcessor.toLowerCase();
+      process.env.MC_HAS_FOOD_PROCESSOR = String(options.mcFoodProcessor).toLowerCase();
     }
     const device = await resolveCommandDevice(options);
     const excludeModes = options.excludeModes
@@ -1027,7 +1057,7 @@ program
     const activeCookie = await resolveCookieForDevice(device, options);
 
     printOutput(await adapter.getCurrentUser(activeCookie), program.optsWithGlobals().json, (v) => {
-      return formatUserForTerminal(device, v);
+      return formatUserForTerminal(device, isRecord(v) ? v : {});
     });
   });
 

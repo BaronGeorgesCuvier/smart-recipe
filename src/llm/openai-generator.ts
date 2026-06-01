@@ -1,7 +1,10 @@
 import OpenAI from "openai";
 import type { RetrievedRecipePage } from "../retriever/types.js";
+import type { RecipeInput } from "../recipes/schema.js";
 import type { RecipeGenerationOptions, RecipeGenerator } from "./types.js";
 import { makeOpenAIStrictSchema } from "./schema-format.js";
+import { getArray, getRecord, getString } from "../utils/unknown.js";
+import type { ReasoningEffort } from "./types.js";
 
 type GenerationDefaults = Required<Omit<RecipeGenerationOptions, "adapter">> & Pick<RecipeGenerationOptions, "adapter">;
 
@@ -18,7 +21,7 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
     this.client = options.client ?? new OpenAI();
     this.defaults = {
       model: options.model ?? process.env.OPENAI_MODEL ?? "gpt-5.5",
-      reasoningEffort: options.reasoningEffort ?? (process.env.OPENAI_REASONING_EFFORT as any) ?? "medium",
+      reasoningEffort: options.reasoningEffort ?? parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT),
       locale: options.locale ?? "de-DE",
       maxCorrectionAttempts: options.maxCorrectionAttempts ?? 3,
       excludeModes: options.excludeModes ?? [],
@@ -26,7 +29,7 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
     };
   }
 
-  async generate(page: RetrievedRecipePage, options: RecipeGenerationOptions = {}): Promise<any> {
+  async generate(page: RetrievedRecipePage, options: RecipeGenerationOptions = {}): Promise<RecipeInput> {
     const cleanOptions = Object.fromEntries(
       Object.entries(options).filter(([_, v]) => v !== undefined)
     );
@@ -45,7 +48,7 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
       const excludedErrors = validateExcludedModes(output, finalOptions.excludeModes);
       const allErrors = [...validation.errors, ...excludedErrors];
       if (validation.ok && excludedErrors.length === 0) {
-        return adapter.normalizeInput(output);
+        return adapter.normalizeInput(output) as RecipeInput;
       }
       feedback = { errors: allErrors, previous: output };
     }
@@ -75,7 +78,7 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
       ].join("\n")
       : "";
 
-    const response = await (this.client as any).responses.create({
+    const response = await this.client.responses.create({
       model: options.model,
       reasoning: { effort: options.reasoningEffort },
       text: {
@@ -111,9 +114,9 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
               .filter((image) => image.dataUrl)
               .slice(0, 3)
               .map((image, index) => ({
-                type: "input_image",
+                type: "input_image" as const,
                 image_url: image.dataUrl,
-                detail: index === 0 ? "high" : "low"
+                detail: index === 0 ? "high" as const : "low" as const
               }))
           ]
         }
@@ -135,20 +138,20 @@ function validateExcludedModes(output: unknown, excludeModes: string[] = []): st
   const errors: string[] = [];
 
   // MC structure
-  const mcSteps: unknown[] = (output as any)?.servingSize?.steps ?? [];
-  mcSteps.forEach((step: any, index: number) => {
-    const modeType = step?.mode?.type;
+  const mcSteps = getArray(getRecord(output, "servingSize"), "steps");
+  mcSteps.forEach((step, index) => {
+    const modeType = getString(getRecord(step, "mode"), "type");
     if (modeType && excluded.has(modeType)) {
       errors.push(`/servingSize/steps/${index}/mode/type must not be "${modeType}" — this mode requires an accessory the user does not own. Replace it with an alternative mode or type "none".`);
     }
   });
 
   // TM structure
-  const tmSteps: unknown[] = (output as any)?.steps ?? [];
-  tmSteps.forEach((step: any, index: number) => {
-    const annotations: any[] = step?.modeAnnotations ?? [];
-    annotations.forEach((ann: any, annIdx: number) => {
-      const modeType = ann?.mode?.type;
+  const tmSteps = getArray(output, "steps");
+  tmSteps.forEach((step, index) => {
+    const annotations = getArray(step, "modeAnnotations");
+    annotations.forEach((ann, annIdx) => {
+      const modeType = getString(getRecord(ann, "mode"), "type");
       if (modeType && excluded.has(modeType)) {
         errors.push(`/steps/${index}/modeAnnotations/${annIdx}/mode/type must not be "${modeType}" — this mode requires an accessory the user does not own. Replace it with an alternative mode.`);
       }
@@ -156,4 +159,8 @@ function validateExcludedModes(output: unknown, excludeModes: string[] = []): st
   });
 
   return errors;
+}
+
+function parseReasoningEffort(value: string | undefined): ReasoningEffort {
+  return value === "minimal" || value === "low" || value === "medium" || value === "high" ? value : "medium";
 }

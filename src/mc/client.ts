@@ -10,6 +10,7 @@ import type { SmartRecipePayload } from "../recipes/types.js";
 import { assertSmartRecipePayload } from "../recipes/validation.js";
 import type { SupportedLocale } from "../catalogs/types.js";
 import { validateApiResponse } from "../devices/response-validation.js";
+import { getRecord } from "../utils/unknown.js";
 
 export interface MonsieurCuisineSmartClientOptions {
   cookie?: string;
@@ -28,6 +29,13 @@ export interface ProxyOptions {
   payload?: unknown;
   locale?: SupportedLocale;
   referer?: string;
+}
+
+export interface McProxyResponse {
+  code?: number;
+  message?: string;
+  data?: unknown;
+  [key: string]: unknown;
 }
 
 export const MONSIEUR_CUISINE_BASE_URL = "https://www.monsieur-cuisine.com";
@@ -110,7 +118,7 @@ export class MonsieurCuisineSmartClient {
     return session.cookie;
   }
 
-  async proxy({ endpoint, method = "GET", payload, locale = this.locale, referer }: ProxyOptions): Promise<any> {
+  async proxy({ endpoint, method = "GET", payload, locale = this.locale, referer }: ProxyOptions): Promise<McProxyResponse> {
     await this.authenticate();
     this.logger.debug({ endpoint, method, locale }, "calling Monsieur Cuisine proxy");
     const response = await this.fetchImpl(`${this.baseUrl}/proxy-api`, {
@@ -141,20 +149,22 @@ export class MonsieurCuisineSmartClient {
         endpoint
       });
     }
-    if (body && typeof body === "object" && "code" in body && body.code !== 0) {
-      throw new MonsieurCuisineApiError(body.message || `Monsieur Cuisine API code ${body.code}`, {
+    const proxyBody = body as McProxyResponse;
+    if (proxyBody.code !== undefined && proxyBody.code !== 0) {
+      throw new MonsieurCuisineApiError(proxyBody.message || `Monsieur Cuisine API code ${proxyBody.code}`, {
         status: response.status,
-        code: body.code,
-        response: body,
+        code: proxyBody.code,
+        response: proxyBody,
         endpoint
       });
     }
-    return body;
+    return proxyBody;
   }
 
   async getCurrentUser(): Promise<unknown> {
     const result = await this.proxy({ endpoint: "api/v1/users" });
-    const user = result.data?.user ?? result.data ?? result;
+    const data = getRecord(result, "data");
+    const user = getRecord(data, "user") ?? data ?? result;
     this.assertVendorResponse(McUserResponseSchema, user, "api/v1/users");
     return user;
   }
@@ -177,12 +187,13 @@ export class MonsieurCuisineSmartClient {
       endpoint: `api/v3/auth/user/recipes/${recipeId}`,
       referer: this.recipeUrl(Number(recipeId))
     });
-    const recipe = result.data?.recipe ?? result.data ?? result;
+    const data = getRecord(result, "data");
+    const recipe = getRecord(data, "recipe") ?? data ?? result;
     this.assertVendorResponse(McRecipeResponseSchema, recipe, `api/v3/auth/user/recipes/${recipeId}`);
     return result;
   }
 
-  async createRecipe(payload: SmartRecipePayload, { locale = payload.languageLocale } = {}): Promise<any> {
+  async createRecipe(payload: SmartRecipePayload, { locale = payload.languageLocale } = {}): Promise<unknown> {
     assertSmartRecipePayload(payload);
     const result = await this.proxy({
       endpoint: "api/v3/auth/user/recipes/",
@@ -191,7 +202,8 @@ export class MonsieurCuisineSmartClient {
       payload,
       referer: createRecipeUrl(locale)
     });
-    const recipe = result.data?.recipe ?? result.data ?? result;
+    const data = getRecord(result, "data");
+    const recipe = getRecord(data, "recipe") ?? data ?? result;
     this.assertVendorResponse(McRecipeCreateResponseSchema, recipe, "api/v3/auth/user/recipes/");
     return recipe;
   }
@@ -204,9 +216,9 @@ export class MonsieurCuisineSmartClient {
       payload: { fileName, mimeType },
       referer: createRecipeUrl(locale)
     });
-    const uploadUrl = result.data ?? result;
+    const uploadUrl = getRecord(result, "data") ?? result;
     this.assertVendorResponse(McImageUploadUrlResponseSchema, uploadUrl, "api/v1/media/image/upload-url");
-    return uploadUrl;
+    return uploadUrl as { url: string; mediaId: number };
   }
 
   async uploadMediaBytes(uploadUrl: string, bytes: BodyInit, { mimeType = "image/jpeg" } = {}): Promise<true> {
@@ -224,10 +236,11 @@ export class MonsieurCuisineSmartClient {
     return true;
   }
 
-  async getMedia(mediaIds: number[], { locale = this.locale } = {}): Promise<any> {
+  async getMedia(mediaIds: number[], { locale = this.locale } = {}): Promise<unknown> {
     const query = mediaIds.map((id) => `ids[]=${encodeURIComponent(id)}`).join("&");
     const result = await this.proxy({ endpoint: `api/v1/media?${query}`, locale });
-    const media = result.data?.media ?? result.data ?? result;
+    const data = getRecord(result, "data");
+    const media = getRecord(data, "media") ?? data ?? result;
     this.assertVendorResponse(McMediaListResponseSchema, media, `api/v1/media?${query}`);
     return media;
   }
@@ -294,7 +307,7 @@ export class MonsieurCuisineSmartClient {
   }
 }
 
-async function parseResponseBody(response: Response): Promise<any> {
+async function parseResponseBody(response: Response): Promise<unknown> {
   const text = await response.text();
   if (!text) return null;
   try {

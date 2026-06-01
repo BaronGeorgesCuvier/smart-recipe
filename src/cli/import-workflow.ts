@@ -8,11 +8,12 @@ import type { SmartRecipeLogger } from "../logging/logger.js";
 import { confirm, password, select } from "./prompts.js";
 import { blankLine, colorCyan, colorDim, printSuccess, printWarning } from "./terminal.js";
 import { withCliSpinner } from "./spinner.js";
+import type { DeviceAdapter } from "../devices/adapter.js";
 
 export type RecipeImageMode = "generate" | "generate-with-sources" | "skip" | "none";
 
 export async function resolveTargetDeviceSettings(
-  options: any,
+  options: Record<string, unknown>,
   isInteractive: boolean,
   configPath: string
 ): Promise<{ device: "mc" | "tm"; prompted: boolean }> {
@@ -33,10 +34,10 @@ export async function resolveTargetDeviceSettings(
       device = "mc";
     }
   } else {
-    device = normalizeDeviceOption(options.device || process.env.TARGET_DEVICE || "mc");
+    device = normalizeDeviceOption(typeof options.device === "string" ? options.device : process.env.TARGET_DEVICE || "mc");
   }
 
-  if (options.tmVersion) {
+  if (typeof options.tmVersion === "string") {
     process.env.TM_VERSION = options.tmVersion.toLowerCase();
   }
 
@@ -79,7 +80,7 @@ export async function ensureOpenAIKey(isInteractive: boolean, configPath: string
   }
 }
 
-export function explicitImageMode(options: any): RecipeImageMode | null {
+export function explicitImageMode(options: Record<string, unknown>): RecipeImageMode | null {
   if (options.noImage) return "none";
   if (options.useSourceImage) return "skip";
   if (options.recreateImageWithSourceImages || options.imageReferenceSource) return "generate-with-sources";
@@ -87,9 +88,9 @@ export function explicitImageMode(options: any): RecipeImageMode | null {
   return null;
 }
 
-export function resolveExcludedModes(targetDevice: "mc" | "tm", options: any): string[] {
+export function resolveExcludedModes(targetDevice: "mc" | "tm", options: Record<string, unknown>): string[] {
   const excludeModes: string[] = options.excludeModes
-    ? options.excludeModes.split(",").map((mode: string) => mode.trim())
+    ? String(options.excludeModes).split(",").map((mode) => mode.trim())
     : [];
 
   if (targetDevice === "mc" && !mcHasFoodProcessor() && !excludeModes.includes("foodProcessor")) {
@@ -104,9 +105,9 @@ export function resolveExcludedModes(targetDevice: "mc" | "tm", options: any): s
 }
 
 export async function decideUpload(
-  options: any,
+  options: Record<string, unknown>,
   isInteractive: boolean,
-  adapter: any
+  adapter: DeviceAdapter
 ): Promise<{ shouldUpload: boolean; prompted: boolean }> {
   if (options.dryRun) return { shouldUpload: false, prompted: false };
   if (options.alwaysUpload) return { shouldUpload: true, prompted: false };
@@ -126,10 +127,10 @@ export async function resolveImageProvider(
   initialMode: RecipeImageMode | null,
   generated: GenerateSmartRecipeResult,
   isInteractive: boolean,
-  options: any,
+  options: Record<string, unknown>,
   logger: SmartRecipeLogger,
   spinnerEnabled = false
-): Promise<{ imageMode: RecipeImageMode; imageProvider: any; prompted: boolean }> {
+): Promise<{ imageMode: RecipeImageMode; imageProvider: RecipeImageProvider<unknown> | undefined; prompted: boolean }> {
   const imageMode = await resolveImageMode(initialMode, generated, isInteractive);
   const imageProvider = createImageProvider(imageMode, options, logger);
   return {
@@ -276,7 +277,7 @@ async function resolveImageMode(
   if (imageMode !== null) return imageMode;
   if (!isInteractive) return "skip";
 
-  const sourceImageCount = generated.page.images?.filter((img: any) => img.score >= 0.5).length ?? 0;
+  const sourceImageCount = generated.page.images?.filter((img) => img.score >= 0.5).length ?? 0;
   const sourceHint = sourceImageCount > 0
     ? `  ${colorDim(`(${sourceImageCount} potential recipe image${sourceImageCount !== 1 ? "s" : ""} found on the source page)`)}`
     : `  ${colorDim("(no suitable source images found on the page)")}`;
@@ -313,15 +314,15 @@ async function resolveImageMode(
 
 function createImageProvider(
   imageMode: RecipeImageMode,
-  options: any,
+  options: Record<string, unknown>,
   logger: SmartRecipeLogger
 ) {
   if (imageMode === "none") return new NullImageProvider();
   if (imageMode === "skip") return undefined;
   return new OpenAIRecipeImageGenerator({
-    model: options.imageModel,
-    size: options.imageSize,
-    quality: options.imageQuality,
+    model: typeof options.imageModel === "string" ? options.imageModel : undefined,
+    size: typeof options.imageSize === "string" ? options.imageSize : undefined,
+    quality: parseImageQualityOption(options.imageQuality),
     includeSourceImages: imageMode === "generate-with-sources",
     logger,
   });
@@ -341,4 +342,8 @@ class SpinnerRecipeImageProvider<TRecipe> implements RecipeImageProvider<TRecipe
       }
     );
   }
+}
+
+function parseImageQualityOption(value: unknown): "low" | "medium" | "high" | "auto" | undefined {
+  return value === "low" || value === "medium" || value === "high" || value === "auto" ? value : undefined;
 }

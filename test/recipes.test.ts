@@ -73,7 +73,7 @@ describe("Smart recipe payloads", () => {
     const payload = createSmartRecipePayload(recipeInput);
     expect(payload.deviceTypeIds).toEqual([13]);
     expect(payload.categoryIds).toEqual([220, 579]);
-    expect((payload.servingSizes[0] as any).steps[1].mode.type).toBe("customized");
+    expect((payload.servingSizes[0] as { steps: Array<{ mode: { type: string } }> }).steps[1].mode.type).toBe("customized");
   });
 
   it("uses localized default ingredient group names", () => {
@@ -88,7 +88,7 @@ describe("Smart recipe payloads", () => {
         ingredientGroups: [{ ingredients: [{ name: "Tomatoes", amount: 400, unit: "g", isOptional: false }] }]
       }
     });
-    expect((payload.servingSizes[0] as any).ingredientGroups[0].name).toBe("Ingredients");
+    expect((payload.servingSizes[0] as { ingredientGroups: Array<{ name: string }> }).ingredientGroups[0].name).toBe("Ingredients");
   });
 
   it("rejects reverse rotation above speed 3", () => {
@@ -151,7 +151,7 @@ describe("Smart recipe payloads", () => {
         ]
       }
     });
-    expect((payload.servingSizes[0] as any).steps[0].mode.modeSetting.texture).toBe("waxy_soft");
+    expect((payload.servingSizes[0] as { steps: Array<{ mode: { modeSetting: { texture: string } } }> }).steps[0].mode.modeSetting.texture).toBe("waxy_soft");
   });
 
   it("enforces type-safety on step descriptions for automatic cooking modes in TypeScript", () => {

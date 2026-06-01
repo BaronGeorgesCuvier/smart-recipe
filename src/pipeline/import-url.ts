@@ -38,10 +38,10 @@ export interface ImportRecipeFromUrlOptions {
 
 export interface ImportRecipeFromUrlResult {
   page: RetrievedRecipePage;
-  recipeInput: any;
-  payload: any;
-  uploadedImage?: any;
-  recipeImage?: any;
+  recipeInput: unknown;
+  payload: unknown;
+  uploadedImage?: unknown;
+  recipeImage?: unknown;
   draft?: unknown;
   recipeUrl?: string;
 }
@@ -64,30 +64,30 @@ export interface GenerateSmartRecipeOptions {
 
 export interface GenerateSmartRecipeResult {
   page: RetrievedRecipePage;
-  recipeInput: any;
-  payload: any;
+  recipeInput: unknown;
+  payload: unknown;
 }
 
 // ─── Upload-only options ──────────────────────────────────────────────────────
 
 export interface UploadSmartRecipeOptions {
   page: RetrievedRecipePage;
-  recipeInput: any;
+  recipeInput: unknown;
   locale?: SupportedLocale;
   cookie?: string;
   authProvider?: AuthProvider;
   imageProvider?: RecipeImageProvider;
   logger?: SmartRecipeLogger;
   adapter?: DeviceAdapter;
-  payload?: any;
+  payload?: unknown;
 }
 
 export interface UploadSmartRecipeResult {
-  uploadedImage?: any;
-  recipeImage?: any;
+  uploadedImage?: unknown;
+  recipeImage?: unknown;
   draft?: unknown;
   recipeUrl?: string;
-  payload: any;
+  payload: unknown;
 }
 
 // ─── Phase 1: Generate ────────────────────────────────────────────────────────

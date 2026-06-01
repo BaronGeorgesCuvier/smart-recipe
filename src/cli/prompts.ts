@@ -10,11 +10,11 @@ import {
 
 let ttyStream: tty.ReadStream | undefined;
 
-function getInteractiveInput() {
+function getInteractiveInput(): NodeJS.ReadStream {
   if (process.platform === "win32") {
     return process.stdin;
   }
-  if ((process.stdin as any).readableEnded || !(process.stdin as any).readable) {
+  if (process.stdin.readableEnded || !process.stdin.readable) {
     if (!ttyStream) {
       try {
         const fd = fs.openSync("/dev/tty", "r");

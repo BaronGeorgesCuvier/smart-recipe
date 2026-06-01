@@ -1,91 +1,91 @@
-export function mapMonsieurCuisineToInput(recipe: any): any {
-  const serving = recipe.servingSizes?.[0] || recipe.servingSize || {};
+import type { RecipeInput } from "../recipes/schema.js";
+import type { SupportedLocale } from "../catalogs/types.js";
+import { getArray, getNumber, getRecord, getString } from "../utils/unknown.js";
+
+export function mapMonsieurCuisineToInput(recipe: unknown): RecipeInput {
+  const source = getRecord(recipe, "data")?.recipe ?? recipe;
+  const serving = getArray(source, "servingSizes")[0] ?? getRecord(source, "servingSize") ?? {};
   return {
-    title: recipe.title || "Recipe",
-    description: recipe.description || "",
+    title: getString(source, "title") ?? "Recipe",
+    description: getString(source, "description") ?? "",
     settings: {
-      locale: recipe.languageLocale || "de-DE",
-      complexityId: recipe.complexity?.id || 142
+      locale: (getString(source, "languageLocale") ?? "de-DE") as SupportedLocale,
+      complexityId: getNumber(getRecord(source, "complexity"), "id") ?? 142
     },
-    status: recipe.status,
-    nutrients: recipe.nutrients,
+    status: getString(source, "status") === "private-publish" ? "private-publish" : "draft",
+    categoryIds: [],
+    nutrients: getArray(source, "nutrients").map((nutrient) => ({
+      name: (getString(nutrient, "name") ?? "calories") as "calories" | "carbohydrate" | "fat" | "protein",
+      unit: getString(nutrient, "unit") ?? "",
+      amount: getNumber(nutrient, "amount") ?? 0
+    })),
     servingSize: {
-      amount: serving.amount || 1,
-      unit: serving.unit || "Portion",
-      preparationTime: serving.preparationTime || 0,
-      readyInTime: serving.readyInTime || 0,
-      ingredientGroups: (serving.ingredientGroups || []).map((g: any) => ({
-        name: g.name || "",
-        ingredients: (g.ingredients || []).map((i: any) => ({
-          name: i.name,
-          amount: i.amount || "",
-          unit: i.unit || "",
-          isOptional: i.isOptional
+      amount: getNumber(serving, "amount") ?? 1,
+      unit: getString(serving, "unit") ?? "Portion",
+      preparationTime: getNumber(serving, "preparationTime") ?? 0,
+      readyInTime: getNumber(serving, "readyInTime") ?? 0,
+      ingredientGroups: getArray(serving, "ingredientGroups").map((group) => ({
+        name: getString(group, "name") ?? "",
+        ingredients: getArray(group, "ingredients").map((ingredient) => ({
+          name: getString(ingredient, "name") ?? "",
+          amount: getString(ingredient, "amount") ?? getNumber(ingredient, "amount") ?? "",
+          unit: getString(ingredient, "unit") ?? "",
+          isOptional: getBoolean(ingredient, "isOptional") ?? false
         }))
       })),
-      steps: (serving.steps || []).map((s: any) => {
-        let mappedMode: any = { type: "none" };
-        if (s.mode) {
-          const type = s.mode.type;
-          const settings = s.mode.deviceSettings?.[0] || {};
-          const duration = settings.time || 0;
-          const mins = Math.floor(duration / 60);
-          const secs = duration % 60;
-
-          if (type === "manualCooking" || type === "manual_cooking") {
-            mappedMode = {
-              type: "manualCooking",
-              temperature: settings.temperature || 0,
-              minutes: mins,
-              seconds: secs,
-              speed: settings.speed || 0,
-              rotationDirection: settings.clockwise === false ? "left" : "right"
-            };
-          } else if (type === "turbo") {
-            mappedMode = { type: "turbo", seconds: duration };
-          } else if (type === "scale") {
-            mappedMode = { type: "scale", grams: settings.weight || 0 };
-          } else if (type === "roasting" || type === "roast") {
-            mappedMode = {
-              type: "roast",
-              temperature: settings.temperature || 0,
-              minutes: mins,
-              seconds: secs
-            };
-          } else if (type === "solid_dough_knead" || type === "solidDoughKnead") {
-            mappedMode = { type: "solidDoughKnead", minutes: mins, seconds: secs };
-          } else if (type === "soft_dough_knead" || type === "softDoughKnead") {
-            mappedMode = { type: "softDoughKnead", minutes: mins, seconds: secs };
-          } else if (type === "liquid_dough_knead" || type === "liquidDoughKnead") {
-            mappedMode = { type: "liquidDoughKnead", minutes: mins, seconds: secs };
-          } else if (type === "steam" || type === "steaming") {
-            mappedMode = { type: "steam", minutes: mins, seconds: secs };
-          } else if (type === "sous_vide" || type === "sousVide") {
-            mappedMode = { type: "sousVide", temperature: settings.temperature || 0, minutes: mins, seconds: secs };
-          } else if (type === "slow_cooking" || type === "slowCooking") {
-            mappedMode = { type: "slowCooking", temperature: settings.temperature || 0, minutes: mins, seconds: secs };
-          } else if (type === "cooking_eggs" || type === "cookingEggs") {
-            mappedMode = { type: "cookingEggs", size: s.mode.modeSetting?.size || "medium", texture: s.mode.modeSetting?.texture || "waxy_soft" };
-          } else if (type === "precleaning") {
-            mappedMode = { type: "precleaning", duration: s.mode.modeSetting?.duration || "short" };
-          } else if (type === "fermentation") {
-            mappedMode = { type: "fermentation", temperature: settings.temperature || 0, minutes: mins, seconds: secs };
-          } else if (type === "rice_cooking" || type === "riceCooking") {
-            mappedMode = { type: "riceCooking", minutes: mins, seconds: secs };
-          } else if (type === "food_cooking" || type === "foodProcessor") {
-            mappedMode = { type: "foodProcessor", minutes: mins, seconds: secs };
-          } else if (type === "puree") {
-            mappedMode = { type: "puree", minutes: mins, seconds: secs };
-          } else if (type === "smoothie") {
-            mappedMode = { type: "smoothie", minutes: mins, seconds: secs };
-          }
-        }
-        return {
-          title: s.title || s.description || s.text || "",
-          description: s.title ? (s.description || s.text || "") : "",
-          mode: mappedMode
-        };
-      })
+      steps: getArray(serving, "steps").map((step) => ({
+        title: firstNonEmpty(getString(step, "title"), getString(step, "description"), getString(step, "text")),
+        description: getString(step, "title") ? (getString(step, "description") ?? getString(step, "text") ?? "") : "",
+        mode: mapMode(getRecord(step, "mode"))
+      }))
     }
-  };
+  } as unknown as RecipeInput;
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string {
+  return values.find((value) => value && value.length > 0) ?? "";
+}
+
+function getBoolean(value: unknown, key: string): boolean | undefined {
+  const record = getRecord({ value }, "value");
+  return record && typeof record[key] === "boolean" ? record[key] : undefined;
+}
+
+type McMode = RecipeInput["servingSize"]["steps"][number]["mode"];
+
+function mapMode(mode: unknown): McMode {
+  if (!mode) return { type: "none" };
+  const type = getString(mode, "type");
+  const settings = getArray(mode, "deviceSettings")[0] ?? {};
+  const duration = getNumber(settings, "time") ?? 0;
+  const mins = Math.floor(duration / 60);
+  const secs = duration % 60;
+
+  if (type === "manualCooking" || type === "manual_cooking") {
+    return {
+      type: "manualCooking",
+      temperature: getNumber(settings, "temperature") ?? 0,
+      minutes: mins,
+      seconds: secs,
+      speed: getNumber(settings, "speed") ?? 0,
+      rotationDirection: getBoolean(settings, "clockwise") === false ? "left" : "right"
+    } as McMode;
+  }
+  if (type === "turbo") return { type: "turbo", seconds: duration };
+  if (type === "scale") return { type: "scale", grams: getNumber(settings, "weight") ?? 0 };
+  if (type === "roasting" || type === "roast") return { type: "roast", temperature: getNumber(settings, "temperature") ?? 0, minutes: mins, seconds: secs } as McMode;
+  if (type === "solid_dough_knead" || type === "solidDoughKnead") return { type: "solidDoughKnead", minutes: mins, seconds: secs };
+  if (type === "soft_dough_knead" || type === "softDoughKnead") return { type: "softDoughKnead", minutes: mins, seconds: secs };
+  if (type === "liquid_dough_knead" || type === "liquidDoughKnead") return { type: "liquidDoughKnead", minutes: mins, seconds: secs };
+  if (type === "steam" || type === "steaming") return { type: "steam", minutes: mins, seconds: secs };
+  if (type === "sous_vide" || type === "sousVide") return { type: "sousVide", temperature: getNumber(settings, "temperature") ?? 0, minutes: mins, seconds: secs } as McMode;
+  if (type === "slow_cooking" || type === "slowCooking") return { type: "slowCooking", temperature: getNumber(settings, "temperature") ?? 0, minutes: mins, seconds: secs } as McMode;
+  if (type === "cooking_eggs" || type === "cookingEggs") return { type: "cookingEggs", size: "medium", texture: "waxy_soft" };
+  if (type === "precleaning") return { type: "precleaning", duration: "short" };
+  if (type === "fermentation") return { type: "fermentation", temperature: getNumber(settings, "temperature") ?? 0, minutes: mins, seconds: secs } as McMode;
+  if (type === "rice_cooking" || type === "riceCooking") return { type: "riceCooking", minutes: mins, seconds: secs };
+  if (type === "food_cooking" || type === "foodProcessor") return { type: "foodProcessor", minutes: mins, seconds: secs };
+  if (type === "puree") return { type: "puree", minutes: mins, seconds: secs };
+  if (type === "smoothie") return { type: "smoothie", minutes: mins, seconds: secs };
+  return { type: "none" };
 }

@@ -1,6 +1,7 @@
 import Type, { type TSchema } from "typebox";
 import { CookidooAuthError, CookidooError, CookidooRateLimitError, isRateLimitBody } from "./errors.js";
 import { validateApiResponse } from "../response-validation.js";
+import { getRecord, getString, isRecord } from "../../utils/unknown.js";
 
 export interface Localization {
   domain: string;
@@ -173,7 +174,8 @@ export class CookidooClient {
       });
     }
     const formData = new FormData();
-    const blob = new Blob([options.fileBytes as any], { type: options.mimeType });
+    const fileBytes = new Uint8Array(options.fileBytes);
+    const blob = new Blob([fileBytes.buffer as ArrayBuffer], { type: options.mimeType });
     formData.append("file", blob, "image.jpg");
     formData.append("api_key", "993585863591145");
     formData.append("timestamp", String(options.timestamp));
@@ -219,16 +221,17 @@ function extractImageSignature(response: unknown): string | undefined {
   if (typeof response === "string") return response.trim() || undefined;
   if (!response || typeof response !== "object") return undefined;
 
+  const signatureRecord = getRecord(response, "signature");
   const candidates = [
-    (response as any).signature,
-    (response as any).data?.signature,
-    (response as any).result?.signature,
-    (response as any).payload?.signature,
-    (response as any).signature?.signature,
-    (response as any).data,
+    getString(response, "signature"),
+    getString(getRecord(response, "data"), "signature"),
+    getString(getRecord(response, "result"), "signature"),
+    getString(getRecord(response, "payload"), "signature"),
+    getString(signatureRecord, "signature"),
+    isRecord(response) ? response.data : undefined,
   ];
 
-  return candidates.find((value) => typeof value === "string" && value.trim())?.trim();
+  return candidates.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim();
 }
 
 

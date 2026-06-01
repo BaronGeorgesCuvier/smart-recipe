@@ -16,6 +16,7 @@ import type {
   CookidooRecipeListResult,
   CookidooRecipeSummary,
 } from "./types.js";
+import { getArray } from "../../utils/unknown.js";
 
 export interface CookidooApiOptions {
   cookie: string;
@@ -64,17 +65,17 @@ export class CookidooApi {
   }
 
   async listCreatedRecipes(options: ListCreatedRecipesOptions = {}): Promise<CookidooRecipeListResult> {
-    const res = await this.client.request<any>({
+    const res = await this.client.request<unknown>({
       method: "GET",
       path: `/created-recipes/${this.language}`,
       responseSchema: CookidooCreatedRecipeListSchema,
     });
-    const candidateRecipes = Array.isArray(res) ? res : res?.items ?? res?.data ?? [];
-    const allRecipes = Array.isArray(candidateRecipes) ? candidateRecipes : [];
+    const candidateRecipes = Array.isArray(res) ? res : getArray(res, "items").length > 0 ? getArray(res, "items") : getArray(res, "data");
+    const allRecipes = candidateRecipes.filter((recipe): recipe is CookidooCreatedRecipe => typeof recipe === "object" && recipe !== null);
     const size = options.size && options.size > 0 ? options.size : allRecipes.length;
     const page = options.page && options.page > 0 ? options.page : 1;
     const start = (page - 1) * size;
-    const recipes = allRecipes.slice(start, start + size).map((recipe: any) => this.toSummary(recipe));
+    const recipes = allRecipes.slice(start, start + size).map((recipe) => this.toSummary(recipe));
 
     return {
       total: allRecipes.length,
@@ -100,8 +101,8 @@ export class CookidooApi {
     });
   }
 
-  getOfficialRecipe(id: string): Promise<any> {
-    return this.client.request<any>({
+  getOfficialRecipe(id: string): Promise<unknown> {
+    return this.client.request<unknown>({
       method: "GET",
       path: `/recipes/recipe/${this.language}/${encodeURIComponent(id)}`,
       accept: "application/json",

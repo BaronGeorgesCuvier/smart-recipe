@@ -91,7 +91,7 @@ describe("recipe source ingestion", () => {
       }
       expect(url).toBe("https://assets.tmecosys.com/image/upload/img/recipe/test.jpg");
       return new Response(jpegBytes, { status: 200, headers: { "content-type": "image/jpeg" } });
-    }) as any;
+    }) as typeof fetch;
 
     const page = await fetchRecipeSourceAsPage(
       { type: "cookidoo-created", id: "01KSSGVJPJY3SQ8WXXQTKSFESF" },
@@ -145,7 +145,7 @@ describe("recipe source ingestion", () => {
       }
       expect(url).toBe("https://assets.tmecosys.com/image/upload/img/recipe/baklava");
       return new Response(jpegBytes, { status: 200, headers: { "content-type": "image/jpeg" } });
-    }) as any;
+    }) as typeof fetch;
 
     const page = await fetchRecipeSourceAsPage(
       { type: "cookidoo-official", id: "r776048", locale: "de-DE" },

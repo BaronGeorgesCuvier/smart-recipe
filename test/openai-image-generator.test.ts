@@ -6,21 +6,21 @@ import type { RetrievedRecipePage } from "../src/retriever/types.js";
 
 describe("OpenAIRecipeImageGenerator", () => {
   it("generates a new image from recipe context without source images by default", async () => {
-    const calls: any[] = [];
+    const calls: Array<{ method: "generate" | "edit"; params: Record<string, unknown> }> = [];
     const client = {
       images: {
-        async generate(params: any) {
+        async generate(params: Record<string, unknown>) {
           calls.push({ method: "generate", params });
           return { data: [{ b64_json: Buffer.from("generated-image").toString("base64") }] };
         },
-        async edit(params: any) {
+        async edit(params: Record<string, unknown>) {
           calls.push({ method: "edit", params });
           return { data: [{ b64_json: Buffer.from("edited-image").toString("base64") }] };
         }
       }
     };
 
-    const generator = new OpenAIRecipeImageGenerator({ client: client as any, model: "gpt-image-2" });
+    const generator = new OpenAIRecipeImageGenerator({ client: client as unknown as NonNullable<ConstructorParameters<typeof OpenAIRecipeImageGenerator>[0]>["client"], model: "gpt-image-2" });
     const image = await generator.getImage(pageFixture, recipeFixture);
 
     expect(image.source).toBe("generated");

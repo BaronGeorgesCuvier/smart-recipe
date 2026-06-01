@@ -10,17 +10,17 @@ export function cookieKeyForDevice(device: "mc" | "tm"): "MC_COOKIE" | "TM_COOKI
   return device === "tm" ? "TM_COOKIE" : "MC_COOKIE";
 }
 
-export function activeCookieForDevice(device: "mc" | "tm", options: any): string | undefined {
-  if (options.cookie) return options.cookie;
+export function activeCookieForDevice(device: "mc" | "tm", options: Record<string, unknown>): string | undefined {
+  if (typeof options.cookie === "string") return options.cookie;
   return device === "tm" ? getTmCookie() : process.env.MC_COOKIE;
 }
 
 export async function getOrPromptDevice(
-  options: any,
+  options: Record<string, unknown>,
   isInteractive: boolean,
   configPath: string
 ): Promise<"mc" | "tm"> {
-  let device = options.device || process.env.TARGET_DEVICE;
+  let device = typeof options.device === "string" ? options.device : process.env.TARGET_DEVICE;
   if (!device) {
     if (isInteractive) {
       blankLine();
@@ -51,28 +51,29 @@ export async function getOrPromptDevice(
   return (val === "tm" || val === "thermomix") ? "tm" : "mc";
 }
 
-export function sourceCookiesFromOptions(options: any, detectedSource?: RecipeSource): { mc?: string; tm?: string } {
-  const sourceType = options.source ?? detectedSource?.type;
+export function sourceCookiesFromOptions(options: Record<string, unknown>, detectedSource?: RecipeSource): { mc?: string; tm?: string } {
+  const sourceType = typeof options.source === "string" ? options.source : detectedSource?.type;
   return {
-    mc: options.mcSourceCookie ?? (sourceType === "mc" ? options.sourceCookie : undefined) ?? process.env.MC_COOKIE,
-    tm: options.tmSourceCookie ?? (
+    mc: (typeof options.mcSourceCookie === "string" ? options.mcSourceCookie : undefined) ?? (sourceType === "mc" && typeof options.sourceCookie === "string" ? options.sourceCookie : undefined) ?? process.env.MC_COOKIE,
+    tm: (typeof options.tmSourceCookie === "string" ? options.tmSourceCookie : undefined) ?? (
       sourceType === "tm" ||
       sourceType === "cookidoo" ||
       sourceType === "cookidoo-official" ||
       sourceType === "cookidoo-created"
-        ? options.sourceCookie
+        ? typeof options.sourceCookie === "string" ? options.sourceCookie : undefined
         : undefined
     ) ?? getTmCookie(),
   };
 }
 
-export function sourceLocaleFromOptions(options: any, detectedSource: RecipeSource): string {
-  if (options.sourceLocale) return normalizeSupportedLocale(options.sourceLocale) ?? options.sourceLocale;
+export function sourceLocaleFromOptions(options: Record<string, unknown>, detectedSource: RecipeSource): string {
+  if (typeof options.sourceLocale === "string") return normalizeSupportedLocale(options.sourceLocale) ?? options.sourceLocale;
   if ("locale" in detectedSource && detectedSource.locale) return detectedSource.locale;
   const sourceDevice = sourceDeviceForType(detectedSource.type);
   if (sourceDevice === "tm") return normalizeSupportedLocale(getTmLocale("de-DE")) ?? getTmLocale("de-DE");
   if (sourceDevice === "mc") return normalizeSupportedLocale(process.env.MC_LOCALE) ?? process.env.MC_LOCALE ?? "de-DE";
-  return normalizeSupportedLocale(options.locale ?? options.language) ?? options.locale ?? options.language ?? "de-DE";
+  const requestedLocale = typeof options.locale === "string" ? options.locale : typeof options.language === "string" ? options.language : undefined;
+  return normalizeSupportedLocale(requestedLocale) ?? requestedLocale ?? "de-DE";
 }
 
 export function sourceDeviceForType(sourceType: RecipeSource["type"]): "mc" | "tm" | null {
@@ -83,12 +84,12 @@ export function sourceDeviceForType(sourceType: RecipeSource["type"]): "mc" | "t
 
 export async function getOrPromptTargetLocale(
   targetDevice: "mc" | "tm",
-  options: any,
+  options: Record<string, unknown>,
   isInteractive: boolean,
   configPath: string
 ): Promise<{ locale: SupportedLocale; prompted: boolean }> {
   const localeKey = localeEnvKeyForDevice(targetDevice);
-  const rawLocale = options.locale ?? options.language ?? process.env[localeKey];
+  const rawLocale = (typeof options.locale === "string" ? options.locale : typeof options.language === "string" ? options.language : process.env[localeKey]);
   const locale = normalizeSupportedLocale(rawLocale);
   if (rawLocale && !locale) {
     throw new Error(`Unsupported locale ${rawLocale}. Supported locales: ${supportedLocales.join(", ")}`);

@@ -1,38 +1,41 @@
 import type { RetrievedRecipePage } from "../retriever/types.js";
+import { getArray, getNumber, getRecord, getString, isRecord } from "../utils/unknown.js";
 
-export function cookidooCreatedRecipeToPage(recipe: any, sourceUrl = ""): RetrievedRecipePage {
-  const content = recipe.recipeContent ?? {};
-  const title = content.name ?? recipe.title ?? "Cookidoo Recipe";
-  const ingredients = (content.ingredients ?? content.recipeIngredient ?? []).map((ingredient: any) =>
-    typeof ingredient === "string" ? ingredient : ingredient.text ?? ""
-  ).filter(Boolean);
-  const steps = (content.instructions ?? content.recipeInstructions ?? []).map((step: any) =>
-    typeof step === "string" ? { text: step } : step
-  );
-  const hints = formatHints(content.hints);
+type RecipeObject = Record<string, unknown>;
+
+export function cookidooCreatedRecipeToPage(recipe: unknown, sourceUrl = ""): RetrievedRecipePage {
+  const recipeRecord = asRecipeObject(recipe);
+  const content = getRecord(recipeRecord, "recipeContent") ?? {};
+  const title = getString(content, "name") ?? getString(recipeRecord, "title") ?? "Cookidoo Recipe";
+  const ingredients = ingredientTexts(getArray(content, "ingredients").length ? getArray(content, "ingredients") : getArray(content, "recipeIngredient"));
+  const steps = (getArray(content, "instructions").length ? getArray(content, "instructions") : getArray(content, "recipeInstructions"))
+    .map((step) => (typeof step === "string" ? { text: step } : step));
+  const recipeYield = getRecord(content, "yield");
+  const hints = formatHints(isRecord(content) ? content.hints : undefined);
   const markdown = [
     `# ${title}`,
     "",
     "Source: Cookidoo created recipe",
-    content.yield?.value ? `Servings: ${content.yield.value} ${content.yield.unitText ?? "portion"}` : undefined,
-    content.prepTime ? `Prep time: ${Math.round(content.prepTime / 60)} min` : undefined,
-    content.totalTime ? `Total time: ${Math.round(content.totalTime / 60)} min` : undefined,
-    content.tools?.length ? `Thermomix versions: ${content.tools.join(", ")}` : undefined,
+    getNumber(recipeYield, "value") ? `Servings: ${getNumber(recipeYield, "value")} ${getString(recipeYield, "unitText") ?? "portion"}` : undefined,
+    getNumber(content, "prepTime") ? `Prep time: ${Math.round((getNumber(content, "prepTime") ?? 0) / 60)} min` : undefined,
+    getNumber(content, "totalTime") ? `Total time: ${Math.round((getNumber(content, "totalTime") ?? 0) / 60)} min` : undefined,
+    getArray(content, "tools").length ? `Thermomix versions: ${getArray(content, "tools").join(", ")}` : undefined,
     "",
     "## Ingredients",
-    ...ingredients.map((ingredient: string) => `- ${ingredient}`),
+    ...ingredients.map((ingredient) => `- ${ingredient}`),
     "",
     "## Source Machine Steps",
-    ...steps.flatMap((step: any, index: number) => [
-      `${index + 1}. ${step.text ?? ""}`,
-      ...formatSourceAnnotations(step.annotations).map((line) => `   ${line}`)
+    ...steps.flatMap((step, index) => [
+      `${index + 1}. ${getStepText(step)}`,
+      ...formatSourceAnnotations(getArray(step, "annotations")).map((line) => `   ${line}`)
     ]),
     hints ? ["", "## Notes", hints].join("\n") : undefined,
   ].filter(Boolean).join("\n");
 
+  const id = getString(recipeRecord, "recipeId") ?? "";
   return {
-    url: sourceUrl || recipe.recipeId || "",
-    finalUrl: sourceUrl || recipe.recipeId || "",
+    url: sourceUrl || id,
+    finalUrl: sourceUrl || id,
     title,
     markdown,
     html: "",
@@ -40,73 +43,78 @@ export function cookidooCreatedRecipeToPage(recipe: any, sourceUrl = ""): Retrie
   };
 }
 
-export function cookidooOfficialRecipeToPage(recipe: any, sourceUrl = ""): RetrievedRecipePage {
-  const title = recipe.title ?? recipe.name ?? "Cookidoo Recipe";
-  const ingredients = recipe.recipeIngredientGroups?.flatMap((group: any) =>
-    (group.recipeIngredients ?? []).map((ingredient: any) =>
-      [ingredient.quantity?.value, ingredient.unitNotation, ingredient.ingredientNotation, ingredient.preparation]
-        .filter(Boolean)
-        .join(" ")
-        .replace(/\s+,/g, ",")
-    )
-  ) ?? recipe.recipeIngredient ?? [];
-  const steps = recipe.recipeStepGroups?.flatMap((group: any) => group.recipeSteps ?? []) ?? recipe.recipeInstructions ?? [];
-  const notes = (recipe.additionalInformation ?? []).map((item: any) => cleanText(item.content ?? "")).filter(Boolean);
+export function cookidooOfficialRecipeToPage(recipe: unknown, sourceUrl = ""): RetrievedRecipePage {
+  const recipeRecord = asRecipeObject(recipe);
+  const title = getString(recipeRecord, "title") ?? getString(recipeRecord, "name") ?? "Cookidoo Recipe";
+  const groups = getArray(recipeRecord, "recipeIngredientGroups");
+  const ingredients = groups.length
+    ? groups.flatMap((group) => getArray(group, "recipeIngredients").map(formatOfficialIngredient))
+    : ingredientTexts(getArray(recipeRecord, "recipeIngredient"));
+  const stepGroups = getArray(recipeRecord, "recipeStepGroups");
+  const steps = stepGroups.length
+    ? stepGroups.flatMap((group) => getArray(group, "recipeSteps"))
+    : getArray(recipeRecord, "recipeInstructions");
+  const notes = getArray(recipeRecord, "additionalInformation").map((item) => cleanText(getString(item, "content") ?? "")).filter(Boolean);
+  const servingSize = getRecord(recipeRecord, "servingSize");
+  const servingQuantity = getRecord(servingSize, "quantity");
 
   const markdown = [
     `# ${title}`,
     "",
     "Source: Cookidoo official recipe",
-    recipe.servingSize?.quantity?.value ? `Servings: ${recipe.servingSize.quantity.value} ${recipe.servingSize.unitNotation ?? "portion"}` : undefined,
-    recipe.thermomixVersions?.length ? `Thermomix versions: ${recipe.thermomixVersions.join(", ")}` : undefined,
-    recipe.optionalDevices?.length ? `Optional devices: ${recipe.optionalDevices.join(", ")}` : undefined,
+    getNumber(servingQuantity, "value") ? `Servings: ${getNumber(servingQuantity, "value")} ${getString(servingSize, "unitNotation") ?? "portion"}` : undefined,
+    getArray(recipeRecord, "thermomixVersions").length ? `Thermomix versions: ${getArray(recipeRecord, "thermomixVersions").join(", ")}` : undefined,
+    getArray(recipeRecord, "optionalDevices").length ? `Optional devices: ${getArray(recipeRecord, "optionalDevices").join(", ")}` : undefined,
     "",
     "## Ingredients",
-    ...ingredients.map((ingredient: string) => `- ${cleanText(ingredient)}`),
+    ...ingredients.map((ingredient) => `- ${cleanText(ingredient)}`),
     "",
     "## Source Machine Steps",
-    ...steps.map((step: any, index: number) => `${index + 1}. ${cleanText(typeof step === "string" ? step : step.formattedText ?? step.text ?? "")}`),
-    notes.length ? ["", "## Notes", ...notes.map((note: string) => `- ${note}`)].join("\n") : undefined,
+    ...steps.map((step, index) => `${index + 1}. ${cleanText(getStepText(step))}`),
+    notes.length ? ["", "## Notes", ...notes.map((note) => `- ${note}`)].join("\n") : undefined,
   ].filter(Boolean).join("\n");
 
+  const id = getString(recipeRecord, "id") ?? "";
   return {
-    url: sourceUrl || recipe.id || "",
-    finalUrl: sourceUrl || recipe.id || "",
+    url: sourceUrl || id,
+    finalUrl: sourceUrl || id,
     title,
     markdown,
     html: "",
-    images: imageCandidatesFromCookidooContent(recipe),
+    images: imageCandidatesFromCookidooContent(recipeRecord),
   };
 }
 
-export function monsieurCuisineRecipeToPage(recipe: any, sourceUrl = ""): RetrievedRecipePage {
-  const sourceRecipe = recipe?.data?.recipe ?? recipe;
-  const title = sourceRecipe.title ?? sourceRecipe.name ?? "Monsieur Cuisine Recipe";
-  const serving = sourceRecipe.servingSizes?.[0] ?? sourceRecipe.servingSize ?? {};
-  const ingredientGroups = serving.ingredientGroups ?? [];
-  const steps = serving.steps ?? [];
+export function monsieurCuisineRecipeToPage(recipe: unknown, sourceUrl = ""): RetrievedRecipePage {
+  const recipeRecord = asRecipeObject(recipe);
+  const dataRecipe = getRecord(getRecord(recipeRecord, "data"), "recipe");
+  const sourceRecipe = dataRecipe ?? recipeRecord;
+  const title = getString(sourceRecipe, "title") ?? getString(sourceRecipe, "name") ?? "Monsieur Cuisine Recipe";
+  const serving = getArray(sourceRecipe, "servingSizes")[0] ?? getRecord(sourceRecipe, "servingSize") ?? {};
+  const ingredientGroups = getArray(serving, "ingredientGroups");
+  const steps = getArray(serving, "steps");
 
   const markdown = [
     `# ${title}`,
     "",
     "Source: Monsieur Cuisine recipe",
-    serving.amount ? `Servings: ${serving.amount} ${serving.unit ?? "portion"}` : undefined,
-    serving.preparationTime ? `Prep time: ${serving.preparationTime} min` : undefined,
-    serving.readyInTime ? `Total time: ${serving.readyInTime} min` : undefined,
+    getNumber(serving, "amount") ? `Servings: ${getNumber(serving, "amount")} ${getString(serving, "unit") ?? "portion"}` : undefined,
+    getNumber(serving, "preparationTime") ? `Prep time: ${getNumber(serving, "preparationTime")} min` : undefined,
+    getNumber(serving, "readyInTime") ? `Total time: ${getNumber(serving, "readyInTime")} min` : undefined,
     "",
     "## Ingredients",
-    ...ingredientGroups.flatMap((group: any) => [
-      group.name ? `### ${group.name}` : undefined,
-      ...(group.ingredients ?? []).map((ingredient: any) =>
-        `- ${[ingredient.amount, ingredient.unit, ingredient.name].filter(Boolean).join(" ")}${ingredient.isOptional ? " (optional)" : ""}`
+    ...ingredientGroups.flatMap((group) => [
+      getString(group, "name") ? `### ${getString(group, "name")}` : undefined,
+      ...getArray(group, "ingredients").map((ingredient) =>
+        `- ${[valueToString(getRecordOrSelf(ingredient, "amount")), getString(ingredient, "unit"), getString(ingredient, "name")].filter(Boolean).join(" ")}${getBoolean(ingredient, "isOptional") ? " (optional)" : ""}`
       )
-    ].filter(Boolean)),
+    ].filter((line): line is string => typeof line === "string")),
     "",
     "## Source Machine Steps",
-    ...steps.flatMap((step: any, index: number) => [
-      `${index + 1}. ${[step.title, step.description ?? step.text].filter(Boolean).join(" - ")}`,
-      step.mode ? `   Source mode: ${formatMonsieurCuisineMode(step.mode)}` : undefined
-    ].filter(Boolean)),
+    ...steps.flatMap((step, index) => [
+      `${index + 1}. ${[getString(step, "title"), getString(step, "description") ?? getString(step, "text")].filter(Boolean).join(" - ")}`,
+      getRecord(step, "mode") ? `   Source mode: ${formatMonsieurCuisineMode(getRecord(step, "mode"))}` : undefined
+    ].filter((line): line is string => typeof line === "string")),
   ].filter(Boolean).join("\n");
 
   return {
@@ -119,24 +127,60 @@ export function monsieurCuisineRecipeToPage(recipe: any, sourceUrl = ""): Retrie
   };
 }
 
-function formatSourceAnnotations(annotations: any[] | undefined): string[] {
+function asRecipeObject(value: unknown): RecipeObject {
+  return isRecord(value) ? value : {};
+}
+
+function getRecordOrSelf(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
+}
+
+function getBoolean(value: unknown, key: string): boolean | undefined {
+  return isRecord(value) && typeof value[key] === "boolean" ? value[key] : undefined;
+}
+
+function valueToString(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return undefined;
+}
+
+function ingredientTexts(items: unknown[]): string[] {
+  return items.map((ingredient) => typeof ingredient === "string" ? ingredient : getString(ingredient, "text") ?? "").filter(Boolean);
+}
+
+function formatOfficialIngredient(ingredient: unknown): string {
+  const quantity = getRecord(ingredient, "quantity");
+  return [getNumber(quantity, "value"), getString(ingredient, "unitNotation"), getString(ingredient, "ingredientNotation"), getString(ingredient, "preparation")]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+,/g, ",");
+}
+
+function getStepText(step: unknown): string {
+  if (typeof step === "string") return step;
+  return getString(step, "text") ?? getString(step, "formattedText") ?? "";
+}
+
+function formatSourceAnnotations(annotations: unknown[] | undefined): string[] {
   if (!Array.isArray(annotations)) return [];
   return annotations
-    .filter((annotation) => annotation.type === "MODE" || annotation.type === "TTS")
+    .filter((annotation) => getString(annotation, "type") === "MODE" || getString(annotation, "type") === "TTS")
     .map((annotation) => {
-      if (annotation.type === "MODE") {
-        return `Source mode: ${annotation.name}${annotation.data ? ` ${JSON.stringify(annotation.data)}` : ""}`;
+      const data = isRecord(annotation) ? annotation.data : undefined;
+      if (getString(annotation, "type") === "MODE") {
+        return `Source mode: ${getString(annotation, "name") ?? ""}${data ? ` ${JSON.stringify(data)}` : ""}`;
       }
-      return `Source settings: ${JSON.stringify(annotation.data ?? {})}`;
+      return `Source settings: ${JSON.stringify(data ?? {})}`;
     });
 }
 
-function formatMonsieurCuisineMode(mode: any): string {
-  const settings = mode.deviceSettings?.[0];
-  return [mode.type, settings ? JSON.stringify(settings) : undefined].filter(Boolean).join(" ");
+function formatMonsieurCuisineMode(mode: unknown): string {
+  const settings = getArray(mode, "deviceSettings")[0];
+  return [getString(mode, "type"), settings ? JSON.stringify(settings) : undefined].filter(Boolean).join(" ");
 }
 
-function imageCandidatesFromCookidooContent(content: any): RetrievedRecipePage["images"] {
+function imageCandidatesFromCookidooContent(content: unknown): RetrievedRecipePage["images"] {
   const urls = collectCookidooImageUrls(content).map(normalizeCookidooImageUrl);
   return [...new Set(urls)].map((url) => ({
     url,
@@ -146,32 +190,30 @@ function imageCandidatesFromCookidooContent(content: any): RetrievedRecipePage["
   }));
 }
 
-function collectCookidooImageUrls(content: any): string[] {
+function collectCookidooImageUrls(content: unknown): string[] {
   const urls: string[] = [];
   const add = (value: unknown) => {
     if (typeof value !== "string") return;
     if (!value.trim()) return;
     urls.push(value);
   };
-  const addAsset = (asset: any) => {
-    if (!asset || typeof asset !== "object") return;
+  const addAsset = (asset: unknown) => {
+    if (!isRecord(asset)) return;
     add(asset.square);
     add(asset.portrait);
     add(asset.landscape);
-    if (asset.images && typeof asset.images === "object") {
-      addAsset(asset.images);
-    }
+    addAsset(asset.images);
   };
 
-  add(content?.image);
-  add(content?.squareImage);
-  add(content?.squareRetinaImage);
-  add(content?.landscapeImage);
-  add(content?.portraitImage);
-  addAsset(content?.assets?.images);
-  addAsset(content?.assets);
+  add(getString(content, "image"));
+  add(getString(content, "squareImage"));
+  add(getString(content, "squareRetinaImage"));
+  add(getString(content, "landscapeImage"));
+  add(getString(content, "portraitImage"));
+  addAsset(getRecord(getRecord(content, "assets"), "images"));
+  addAsset(getRecord(content, "assets"));
 
-  for (const asset of content?.descriptiveAssets ?? []) {
+  for (const asset of getArray(content, "descriptiveAssets")) {
     addAsset(asset);
   }
 
@@ -185,16 +227,9 @@ function normalizeCookidooImageUrl(url: string): string {
 function formatHints(hints: unknown): string {
   if (typeof hints === "string") return hints;
   if (!Array.isArray(hints)) return "";
-  return hints.map((hint) => typeof hint === "string" ? hint : cleanText((hint as any)?.content ?? (hint as any)?.text ?? "")).filter(Boolean).join("\n");
+  return hints.map((hint) => typeof hint === "string" ? hint : cleanText(getString(hint, "content") ?? getString(hint, "text") ?? "")).filter(Boolean).join("\n");
 }
 
 function cleanText(value: string): string {
-  return String(value)
-    .replace(/<[^>]*>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+  return value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }

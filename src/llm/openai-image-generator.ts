@@ -6,11 +6,13 @@ import type { RecipeImageAsset, RecipeImageProvider } from "../pipeline/images.j
 import { silentLogger, type SmartRecipeLogger } from "../logging/logger.js";
 import { buildRecipeImagePrompt } from "./prompts.js";
 
+type OpenAIImageQuality = "low" | "medium" | "high" | "auto";
+
 export interface OpenAIRecipeImageGeneratorOptions {
   client?: OpenAI;
   model?: string;
   size?: string;
-  quality?: "low" | "medium" | "high" | "auto";
+  quality?: OpenAIImageQuality;
   outputFormat?: "jpeg" | "png" | "webp";
   includeSourceImages?: boolean;
   maxSourceImages?: number;
@@ -21,7 +23,7 @@ export class OpenAIRecipeImageGenerator implements RecipeImageProvider<RecipeInp
   private readonly client: OpenAI;
   private readonly model: string;
   private readonly size: string;
-  private readonly quality: "low" | "medium" | "high" | "auto";
+  private readonly quality: OpenAIImageQuality;
   private readonly outputFormat: "jpeg" | "png" | "webp";
   private readonly includeSourceImages: boolean;
   private readonly maxSourceImages: number;
@@ -31,7 +33,7 @@ export class OpenAIRecipeImageGenerator implements RecipeImageProvider<RecipeInp
     this.client = options.client ?? new OpenAI();
     this.model = options.model ?? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2";
     this.size = options.size ?? process.env.OPENAI_IMAGE_SIZE ?? "1024x1024";
-    this.quality = options.quality ?? (process.env.OPENAI_IMAGE_QUALITY as any) ?? "medium";
+    this.quality = options.quality ?? parseImageQuality(process.env.OPENAI_IMAGE_QUALITY);
     this.outputFormat = options.outputFormat ?? "jpeg";
     this.includeSourceImages = options.includeSourceImages ?? false;
     this.maxSourceImages = options.maxSourceImages ?? 3;
@@ -124,4 +126,8 @@ function extensionForContentType(contentType: string): string {
   if (contentType.includes("png")) return "png";
   if (contentType.includes("webp")) return "webp";
   return "jpg";
+}
+
+function parseImageQuality(value: string | undefined): OpenAIImageQuality {
+  return value === "low" || value === "medium" || value === "high" || value === "auto" ? value : "medium";
 }

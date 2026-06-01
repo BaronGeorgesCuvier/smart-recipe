@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { chromium, type BrowserContext } from "playwright";
 import { CookidooError } from "./errors.js";
+import { getErrorMessage } from "../../utils/unknown.js";
 
 export interface BrowserLoginOptions {
   locale?: string;
@@ -137,7 +138,7 @@ export async function browserLoginForCookidoo(options: BrowserLoginOptions = {})
       });
     }
     throw new CookidooError({
-      message: `Browser login failed before Cookidoo session cookies could be captured: ${(error as any).message}`,
+      message: `Browser login failed before Cookidoo session cookies could be captured: ${getErrorMessage(error)}`,
       status: 0,
       body: String(error),
       url: startUrl,
@@ -264,7 +265,7 @@ async function installPlaywrightChromium(): Promise<void> {
 
 function isMissingBrowserExecutable(error: unknown): boolean {
   if (!error) return false;
-  const message = (error as any).message || "";
+  const message = error instanceof Error ? error.message : "";
   return message.includes("Executable doesn't exist") || message.includes("looks like Playwright was just installed");
 }
 
@@ -411,10 +412,12 @@ class SimpleCookieJar {
   }
 }
 
+type HeadersWithSetCookie = Headers & { getSetCookie?: () => string[] };
+
 function getSetCookieHeaders(headers: Headers): string[] {
-  const getSetCookie = (headers as any).getSetCookie;
+  const getSetCookie = (headers as HeadersWithSetCookie).getSetCookie;
   if (typeof getSetCookie === "function") {
-    return getSetCookie.call(headers).flatMap((header: string) => splitCombinedSetCookie(header));
+    return getSetCookie.call(headers).flatMap((header) => splitCombinedSetCookie(header));
   }
   const combined = headers.get("set-cookie");
   return combined ? splitCombinedSetCookie(combined) : [];

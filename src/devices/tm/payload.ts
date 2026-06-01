@@ -35,14 +35,25 @@ export interface ModeData {
   accessory?: "Varoma" | "SimmeringBasket" | "VaromaAndSimmeringBasket";
 }
 
-export interface ModeAnnotation {
-  type: "MODE";
-  name: ModeName;
-  data: ModeData;
+export interface IngredientDescriptionData {
+  description?: {
+    text: string;
+    annotations: [];
+  };
+}
+
+export interface Annotation {
+  type: "INGREDIENT" | "MODE";
+  name?: ModeName;
+  data: ModeData & IngredientDescriptionData;
   position: Position;
 }
 
-export type Annotation = ModeAnnotation; // We focus on mode annotations
+export interface ModeAnnotation extends Annotation {
+  type: "MODE";
+  name: ModeName;
+  data: ModeData;
+}
 
 export interface Step {
   type: "STEP";
@@ -211,7 +222,7 @@ export function createCookidooInstructions(input: CookidooRecipeInput): Step[] {
                   annotations: [],
                 },
               },
-            } as any);
+            });
           }
           searchOffsets[term] = offset + term.length;
         }

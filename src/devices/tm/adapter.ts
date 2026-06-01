@@ -20,6 +20,8 @@ import { RetrievedRecipeImageProvider, type RecipeImageProvider } from "../../pi
 import { extractJsonLd, findRecipeObjects } from "../../retriever/json-ld.js";
 import type { SupportedLocale } from "../../catalogs/types.js";
 import { formatAjvValidationErrors } from "../../recipes/validation.js";
+import { getArray, getNumber, getRecord, getString, isRecord } from "../../utils/unknown.js";
+import { CookidooRateLimitError } from "./errors.js";
 
 
 const ansi = {
@@ -276,7 +278,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
 
   async getCurrentUser(cookie: string) {
     const client = new CookidooClient({ cookie, locale: "de-DE" });
-    return client.request<any>({
+    return client.request<unknown>({
       method: "GET",
       path: "/community/profile",
       accept: "application/json",
@@ -287,12 +289,12 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
   async listDrafts(options: { cookie: string; page?: number; size?: number }) {
     const locale = (process.env.TM_LOCALE ?? "de-DE") as string;
     const client = new CookidooClient({ cookie: options.cookie, locale });
-    const res = await client.request<any>({
+    const res = await client.request<unknown>({
       method: "GET",
       path: `/created-recipes/${client.language}`,
       responseSchema: CookidooCreatedRecipeListSchema,
     });
-    const candidateRecipes = Array.isArray(res) ? res : res?.items ?? res?.data ?? [];
+    const candidateRecipes = Array.isArray(res) ? res : getArray(res, "items").length > 0 ? getArray(res, "items") : getArray(res, "data");
     const allRecipes = Array.isArray(candidateRecipes) ? candidateRecipes : [];
     const size = options.size && options.size > 0 ? options.size : allRecipes.length;
     const page = options.page && options.page > 0 ? options.page : 1;
@@ -300,20 +302,28 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
     const recipes = allRecipes.slice(start, start + size);
     return {
       data: {
-        recipes: recipes.map((recipe: any) => ({
-          id: recipe.recipeId,
-          title: recipe.recipeContent?.name ?? recipe.name ?? "",
-          status: recipe.workStatus ?? recipe.status ?? "ACTIVE",
-          updatedAt: recipe.modifiedAt ?? recipe.createdAt,
-          deviceTypes: recipe.recipeContent?.tools ?? recipe.recipeContent?.tool ?? ["Thermomix"],
-          ingredientCount: recipe.recipeContent?.ingredients?.length ?? recipe.recipeContent?.recipeIngredient?.length,
-          stepCount: recipe.recipeContent?.instructions?.length ?? recipe.recipeContent?.recipeInstructions?.length,
-          hasImage: Boolean(recipe.recipeContent?.image || recipe.recipeContent?.descriptiveAssets?.length),
-          hasHints: Boolean(recipe.recipeContent?.hints),
-          recipeUrl: recipe.recipeId
-            ? `https://${client.domain}/created-recipes/${client.language}/${encodeURIComponent(recipe.recipeId)}`
-            : undefined,
-        })),
+        recipes: recipes.map((recipe) => {
+          const content = getRecord(recipe, "recipeContent");
+          const recipeId = getString(recipe, "recipeId");
+          const ingredients = getArray(content, "ingredients");
+          const recipeIngredients = getArray(content, "recipeIngredient");
+          const instructions = getArray(content, "instructions");
+          const recipeInstructions = getArray(content, "recipeInstructions");
+          return {
+            id: recipeId,
+            title: getString(content, "name") ?? getString(recipe, "name") ?? "",
+            status: getString(recipe, "workStatus") ?? getString(recipe, "status") ?? "ACTIVE",
+            updatedAt: getString(recipe, "modifiedAt") ?? getString(recipe, "createdAt"),
+            deviceTypes: getArray(content, "tools").length > 0 ? getArray(content, "tools") : getArray(content, "tool").length > 0 ? getArray(content, "tool") : ["Thermomix"],
+            ingredientCount: ingredients.length || recipeIngredients.length || undefined,
+            stepCount: instructions.length || recipeInstructions.length || undefined,
+            hasImage: Boolean(getString(content, "image") || getArray(content, "descriptiveAssets").length),
+            hasHints: Boolean(isRecord(content) ? content.hints : undefined),
+            recipeUrl: recipeId
+              ? `https://${client.domain}/created-recipes/${client.language}/${encodeURIComponent(recipeId)}`
+              : undefined,
+          };
+        }),
         total: allRecipes.length,
         totalPage: size > 0 ? Math.max(1, Math.ceil(allRecipes.length / size)) : 1,
       },
@@ -331,7 +341,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
         ? `/created-recipes/public/recipes/${client.language}/${encodeURIComponent(options.id)}`
         : `/created-recipes/${client.language}/${encodeURIComponent(options.id)}`;
 
-    const result = await client.request<any>({ method: "GET", path, responseSchema: CookidooRecipePageSchema });
+    const result = await client.request<unknown>({ method: "GET", path, responseSchema: CookidooRecipePageSchema });
     
     if (isOfficial && typeof result === "string") {
       const jsonLd = extractJsonLd(result);
@@ -424,14 +434,14 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
 
     const delays = [30_000, 60_000, 90_000, 120_000];
     let attempt = 0;
-    let draft: any = null;
+    let draft: unknown;
 
     const publicUrl = `https://${client.domain}/created-recipes/public/recipes/${client.language}/01KB04WSJP4SHNBKJK4H4FT0PZ`;
 
     for (;;) {
       try {
         logger.info({ publicUrl, attempt }, "copying public dummy recipe to Cookidoo");
-        draft = await client.request<any>({
+        draft = await client.request<unknown>({
           method: "POST",
           path: `/created-recipes/${client.language}`,
           responseSchema: CookidooCopyRecipeResponseSchema,
@@ -441,17 +451,20 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
           },
         });
         break;
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorRecord = isRecord(err) ? err : undefined;
+        const body = getRecord(errorRecord, "body");
         const isRateLimit =
-          err.name === "CookidooRateLimitError" ||
-          err.status === 429 ||
-          (err.body && typeof err.body === "object" && err.body.code === "importFailed");
+          err instanceof CookidooRateLimitError ||
+          getString(errorRecord, "name") === "CookidooRateLimitError" ||
+          getNumber(errorRecord, "status") === 429 ||
+          getString(body, "code") === "importFailed";
 
         if (!isRateLimit || attempt >= delays.length) {
           throw err;
         }
 
-        const delayMs = Math.max(err.retryAfterMs ?? 0, delays[attempt]);
+        const delayMs = Math.max(getNumber(errorRecord, "retryAfterMs") ?? 0, delays[attempt]);
         logger.warn(
           { attempt: attempt + 1, delayMs },
           `rate limited by Cookidoo copy API. Retrying after delay...`
@@ -475,7 +488,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
     const instructions = createCookidooInstructions(options.recipeInput);
 
     logger.info({ recipeId, title: metaPatch.name }, "patching Cookidoo recipe metadata");
-    const patchedMeta = await client.request<any>({
+    await client.request<unknown>({
       method: "PATCH",
       path: `/created-recipes/${client.language}/${encodeURIComponent(recipeId)}`,
       responseSchema: CookidooPatchResponseSchema,
@@ -483,7 +496,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
     });
 
     logger.info({ recipeId }, "patching Cookidoo recipe instructions");
-    const patchedInstructions = await client.request<any>({
+    await client.request<unknown>({
       method: "PATCH",
       path: `/created-recipes/${client.language}/${encodeURIComponent(recipeId)}`,
       responseSchema: CookidooPatchResponseSchema,
@@ -510,19 +523,23 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
   }
 }
 
-function extractCreatedRecipeId(response: any): string | undefined {
+function extractCreatedRecipeId(response: unknown): string | undefined {
+  const recipe = getRecord(response, "recipe");
+  const data = getRecord(response, "data");
+  const dataRecipe = getRecord(data, "recipe");
+  const createdRecipe = getRecord(response, "createdRecipe");
   const candidates = [
-    response?.recipeId,
-    response?.id,
-    response?.recipe?.recipeId,
-    response?.recipe?.id,
-    response?.data?.recipeId,
-    response?.data?.id,
-    response?.data?.recipe?.recipeId,
-    response?.data?.recipe?.id,
-    response?.createdRecipe?.recipeId,
-    response?.createdRecipe?.id,
+    getString(response, "recipeId"),
+    getString(response, "id"),
+    getString(recipe, "recipeId"),
+    getString(recipe, "id"),
+    getString(data, "recipeId"),
+    getString(data, "id"),
+    getString(dataRecipe, "recipeId"),
+    getString(dataRecipe, "id"),
+    getString(createdRecipe, "recipeId"),
+    getString(createdRecipe, "id"),
   ];
-  const value = candidates.find((candidate) => typeof candidate === "string" && candidate.trim());
+  const value = candidates.find((candidate): candidate is string => Boolean(candidate?.trim()));
   return value?.trim();
 }

@@ -87,10 +87,10 @@ describe("LLM prompt guidance", () => {
   });
 
   it("passes the requested locale into OpenAI generation", async () => {
-    let request: any;
+    let request: unknown;
     const client = {
       responses: {
-        create: async (body: any) => {
+        create: async (body: unknown) => {
           request = body;
           return {
             output_text: JSON.stringify({
@@ -114,15 +114,15 @@ describe("LLM prompt guidance", () => {
       }
     };
     const generator = new OpenAIRecipeGenerator({
-      client: client as any,
+      client: client as unknown as ConstructorParameters<typeof OpenAIRecipeGenerator>[0]["client"],
       locale: "en-US",
       adapter: new MonsieurCuisineAdapter()
     });
 
     await generator.generate(pageFixture, { locale: "en-US" });
 
-    expect(request.instructions).toContain("set settings.locale to en-US");
-    expect(request.input[0].content[0].text).toContain("Preferred locale: en-US");
+    expect((request as { instructions: string }).instructions).toContain("set settings.locale to en-US");
+    expect((request as { input: Array<{ content: Array<{ text: string }> }> }).input[0].content[0].text).toContain("Preferred locale: en-US");
   });
 
   it("includes accessory and hardware rules with de-DE device terms", () => {

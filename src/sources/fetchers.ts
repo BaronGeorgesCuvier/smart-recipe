@@ -3,6 +3,7 @@ import { MonsieurCuisineSmartClient } from "../mc/client.js";
 import { hydrateImages } from "../retriever/images.js";
 import { RecipePageRetriever } from "../retriever/retriever.js";
 import type { RetrievedRecipePage } from "../retriever/types.js";
+import type { SupportedLocale } from "../catalogs/types.js";
 import {
   cookidooCreatedRecipeToPage,
   cookidooOfficialRecipeToPage,
@@ -63,7 +64,7 @@ export class MonsieurCuisineRecipeSourceFetcher implements RecipeSourceFetcher<E
     if (!cookie) throw new Error("Monsieur Cuisine source ingestion requires an MC cookie.");
     const client = new MonsieurCuisineSmartClient({
       cookie,
-      locale: options.locale as any,
+      locale: (options.locale ?? "de-DE") as SupportedLocale,
       fetch: options.fetch,
     });
     return client.getRecipe(source.id);
@@ -95,8 +96,9 @@ export async function fetchRecipeSourceWithRaw(
 ): Promise<{ raw: unknown; page: RetrievedRecipePage }> {
   const fetcher = fetchers.find((candidate) => candidate.canFetch(source));
   if (!fetcher) throw new Error(`No recipe source fetcher for source type: ${source.type}`);
-  const raw = await (fetcher as any).fetch(source, options);
-  let page = (fetcher as any).toRetrievedPage(raw, source) as RetrievedRecipePage;
+  const typedFetcher = fetcher as RecipeSourceFetcher<typeof source, unknown>;
+  const raw = await typedFetcher.fetch(source, options);
+  let page = typedFetcher.toRetrievedPage(raw, source);
   if (source.type !== "web" && options.includeImageBytes !== false && page.images.length > 0) {
     page = {
       ...page,

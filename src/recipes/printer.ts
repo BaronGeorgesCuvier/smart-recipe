@@ -464,41 +464,33 @@ export function formatRecipeTerminal(recipe: RecipeInput): string {
       const params: string[] = [];
       
       if (mode.type === "manualCooking") {
-        const m = mode as any;
-        const temp = m.temperature ?? 0;
+        const temp = mode.temperature ?? 0;
         const tempStr = temp > 0 ? `${temp}°C` : "";
         if (tempStr) params.push(tempStr);
         
-        params.push(formatDuration(m.minutes ?? 0, m.seconds ?? 0, t));
-        params.push(`${t.speed} ${m.speed ?? 0}`);
+        params.push(formatDuration(mode.minutes ?? 0, mode.seconds ?? 0, t));
+        params.push(`${t.speed} ${mode.speed ?? 0}`);
         
-        const rotationVal = m.rotationDirection ?? "right";
+        const rotationVal = mode.rotationDirection ?? "right";
         params.push(rotationVal === "left" ? t.rotation.left : t.rotation.right);
       } else if (mode.type === "scale") {
-        const m = mode as any;
-        params.push(`${m.grams ?? 0} g`);
+        params.push(`${mode.grams ?? 0} g`);
       } else if (mode.type === "roast") {
-        const m = mode as any;
-        params.push(`${m.temperature ?? 0}°C`);
-        params.push(formatDuration(m.minutes ?? 0, m.seconds ?? 0, t));
+        params.push(`${mode.temperature ?? 0}°C`);
+        params.push(formatDuration(mode.minutes ?? 0, mode.seconds ?? 0, t));
       } else if (mode.type === "turbo") {
-        const m = mode as any;
-        params.push(`${m.seconds ?? 0}${t.timeUnits.second}`);
-      } else if (["solidDoughKnead", "softDoughKnead", "liquidDoughKnead", "steam", "riceCooking", "foodProcessor", "puree", "smoothie"].includes(mode.type)) {
-        const m = mode as any;
-        params.push(formatDuration(m.minutes ?? 0, m.seconds ?? 0, t));
+        params.push(`${mode.seconds ?? 0}${t.timeUnits.second}`);
+      } else if (mode.type === "solidDoughKnead" || mode.type === "softDoughKnead" || mode.type === "liquidDoughKnead" || mode.type === "steam" || mode.type === "riceCooking" || mode.type === "foodProcessor" || mode.type === "puree" || mode.type === "smoothie") {
+        params.push(formatDuration(mode.minutes ?? 0, mode.seconds ?? 0, t));
       } else if (mode.type === "sousVide" || mode.type === "slowCooking" || mode.type === "fermentation") {
-        const m = mode as any;
-        if (m.temperature !== undefined) params.push(`${m.temperature}°C`);
-        params.push(formatDuration(m.minutes ?? 0, m.seconds ?? 0, t));
+        if (mode.temperature !== undefined) params.push(`${mode.temperature}°C`);
+        params.push(formatDuration(mode.minutes ?? 0, mode.seconds ?? 0, t));
       } else if (mode.type === "cookingEggs") {
-        const m = mode as any;
-        const sizeStr = t.eggSizes[m.size] || m.size;
-        const textureStr = t.eggTextures[m.texture] || m.texture;
+        const sizeStr = t.eggSizes[mode.size] || mode.size;
+        const textureStr = t.eggTextures[mode.texture] || mode.texture;
         params.push(`${sizeStr}, ${textureStr}`);
       } else if (mode.type === "precleaning") {
-        const m = mode as any;
-        const durStr = t.cleanDurations[m.duration] || m.duration;
+        const durStr = t.cleanDurations[mode.duration] || mode.duration;
         params.push(durStr);
       }
       
