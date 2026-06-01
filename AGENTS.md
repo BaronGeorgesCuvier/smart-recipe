@@ -84,3 +84,15 @@ The project maps text to specific hardware modes (e.g., `dough`, `blend`, `turbo
 - Use `vitest`.
 - Mock external network dependencies (OpenAI, Cookidoo API, Monsieur Cuisine API) using appropriate `vitest` mocking strategies or dependency injection.
 - Ensure all schema validators and payload mappings are strictly unit-tested.
+
+# Typescript best practices:
+
+- Always enable strict mode in tsconfig.json - never set strict: false
+- Use satisfies operator for type checking without widening - never use "as" for type assertions unless absolutely necessary
+- Prefer discriminated unions with a "type" or "kind" field over optional properties
+- Use unknown instead of any for values of uncertain type
+- Use import type for type-only imports
+- Add const assertions when literal types are needed (as const on arrays/objects)
+- Use exhaustive switch with never in default branch when handling union types
+- Prefer type predicates (x is T) over type assertions for runtime type checks
+- When noUncheckedIndexedAccess is enabled, always check for undefined before using indexed access results
