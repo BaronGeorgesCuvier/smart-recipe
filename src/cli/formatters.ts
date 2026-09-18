@@ -36,6 +36,7 @@ type DisplayRecord = {
   deviceName?: string;
   configPath?: string;
   localEnvPath?: string;
+  geminiKeyPresent?: boolean;
   openAiKeyPresent?: boolean;
   cookie?: { present?: boolean; key?: string };
   tm?: { locale?: string; version?: string };
@@ -242,7 +243,8 @@ export function formatDoctorForTerminal(report: DisplayRecord): string {
   parts.push(`  Device:      ${boldCyan}${report.deviceName}${reset}`);
   parts.push(`  Config:      ${report.configPath}`);
   parts.push(`  Local .env:  ${report.localEnvPath}`);
-  parts.push(`  OpenAI key:  ${report.openAiKeyPresent ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`}`);
+  parts.push(`  Gemini key:        ${report.geminiKeyPresent ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`}`);
+  parts.push(`  OpenAI image key:  ${report.openAiKeyPresent ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`}`);
   parts.push(`  Cookie:      ${report.cookie?.present ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`} (${report.cookie?.key})`);
   if (report.tm) {
     parts.push(`  TM locale:   ${report.tm.locale}`);

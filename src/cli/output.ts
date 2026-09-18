@@ -44,7 +44,7 @@ export function printSuggestedCommand(
     suggestedFlags.push(`--locale ${process.env[localeKey]}`);
   }
 
-  const hasImageOption = options.noImage || options.useSourceImage || options.recreateImage || options.recreateImageWithSourceImages || options.imageReferenceSource;
+  const hasImageOption = options.noImage || options.image === false || options.useSourceImage || options.recreateImage || options.recreateImageWithSourceImages || options.imageReferenceSource;
   if (!hasImageOption && imageMode) {
     if (imageMode === "skip") suggestedFlags.push("--use-source-image");
     else if (imageMode === "none") suggestedFlags.push("--no-image");
@@ -188,8 +188,11 @@ function formatGenericCliError(error: unknown, options: CliErrorFormatOptions): 
   if (/unknown option/i.test(plain)) {
     suggestions.push("Run smart-recipe --help or smart-recipe <command> --help to see supported options.");
   }
+  if (/GEMINI_API_KEY/i.test(plain)) {
+    suggestions.push("Set GEMINI_API_KEY in the environment or ~/.smart-recipe.");
+  }
   if (/OPENAI_API_KEY/i.test(plain)) {
-    suggestions.push("Set OPENAI_API_KEY in the environment or ~/.smart-recipe.");
+    suggestions.push("Set OPENAI_API_KEY only if you want optional OpenAI image generation.");
   }
 
   if (suggestions.length === 0) return `${errorHeader("Command failed")}\n${message}`;

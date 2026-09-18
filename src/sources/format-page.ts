@@ -47,9 +47,26 @@ export function cookidooOfficialRecipeToPage(recipe: unknown, sourceUrl = ""): R
   const recipeRecord = asRecipeObject(recipe);
   const title = getString(recipeRecord, "title") ?? getString(recipeRecord, "name") ?? "Cookidoo Recipe";
   const groups = getArray(recipeRecord, "recipeIngredientGroups");
-  const ingredients = groups.length
-    ? groups.flatMap((group) => getArray(group, "recipeIngredients").map(formatOfficialIngredient))
-    : ingredientTexts(getArray(recipeRecord, "recipeIngredient"));
+  const ingredientLines: string[] = groups.length
+    ? groups.flatMap((group) => {
+        const lines: string[] = [];
+        const groupTitle = cleanText(getString(group, "title") ?? "");
+
+        if (groupTitle) {
+          lines.push(`### ${groupTitle}`);
+        }
+
+        for (const ingredient of getArray(group, "recipeIngredients")) {
+          const formatted = cleanText(formatOfficialIngredient(ingredient));
+          if (formatted) {
+            lines.push(`- ${formatted}`);
+          }
+        }
+
+        return lines;
+      })
+    : ingredientTexts(getArray(recipeRecord, "recipeIngredient"))
+        .map((ingredient) => `- ${cleanText(ingredient)}`);
   const stepGroups = getArray(recipeRecord, "recipeStepGroups");
   const steps = stepGroups.length
     ? stepGroups.flatMap((group) => getArray(group, "recipeSteps"))
@@ -57,17 +74,40 @@ export function cookidooOfficialRecipeToPage(recipe: unknown, sourceUrl = ""): R
   const notes = getArray(recipeRecord, "additionalInformation").map((item) => cleanText(getString(item, "content") ?? "")).filter(Boolean);
   const servingSize = getRecord(recipeRecord, "servingSize");
   const servingQuantity = getRecord(servingSize, "quantity");
+  const servingValue = getNumber(servingQuantity, "value");
+  const activeTimeSeconds = getOfficialTimeSeconds(recipeRecord, "activeTime");
+  const totalTimeSeconds = getOfficialTimeSeconds(recipeRecord, "totalTime");
+  const difficulty = getString(recipeRecord, "difficulty");
+  const nutritionLines = formatOfficialNutrition(recipeRecord);
 
   const markdown = [
     `# ${title}`,
     "",
     "Source: Cookidoo official recipe",
-    getNumber(servingQuantity, "value") ? `Servings: ${getNumber(servingQuantity, "value")} ${getString(servingSize, "unitNotation") ?? "portion"}` : undefined,
-    getArray(recipeRecord, "thermomixVersions").length ? `Thermomix versions: ${getArray(recipeRecord, "thermomixVersions").join(", ")}` : undefined,
-    getArray(recipeRecord, "optionalDevices").length ? `Optional devices: ${getArray(recipeRecord, "optionalDevices").join(", ")}` : undefined,
+    servingValue !== undefined
+      ? `Servings: ${servingValue} ${getString(servingSize, "unitNotation") ?? "portion"}`
+      : undefined,
+    activeTimeSeconds !== undefined
+      ? `Prep time: ${Math.round(activeTimeSeconds / 60)} min`
+      : undefined,
+    totalTimeSeconds !== undefined
+      ? `Total time: ${Math.round(totalTimeSeconds / 60)} min`
+      : undefined,
+    difficulty
+      ? `Difficulty: ${difficulty}`
+      : undefined,
+    getArray(recipeRecord, "thermomixVersions").length
+      ? `Thermomix versions: ${getArray(recipeRecord, "thermomixVersions").join(", ")}`
+      : undefined,
+    getArray(recipeRecord, "optionalDevices").length
+      ? `Optional devices: ${getArray(recipeRecord, "optionalDevices").join(", ")}`
+      : undefined,
     "",
     "## Ingredients",
-    ...ingredients.map((ingredient) => `- ${cleanText(ingredient)}`),
+    ...ingredientLines,
+    nutritionLines.length
+      ? ["", "## Nutrition", ...nutritionLines].join("\n")
+      : undefined,
     "",
     "## Source Machine Steps",
     ...steps.map((step, index) => `${index + 1}. ${cleanText(getStepText(step))}`),
@@ -150,11 +190,128 @@ function ingredientTexts(items: unknown[]): string[] {
 }
 
 function formatOfficialIngredient(ingredient: unknown): string {
-  const quantity = getRecord(ingredient, "quantity");
-  return [getNumber(quantity, "value"), getString(ingredient, "unitNotation"), getString(ingredient, "ingredientNotation"), getString(ingredient, "preparation")]
-    .filter(Boolean)
+  const primary = formatOfficialIngredientVariant(ingredient);
+
+  const alternative = getRecord(ingredient, "recipeAlternativeIngredient");
+  const alternativeText = alternative
+    ? formatOfficialIngredientVariant(alternative)
+    : "";
+
+  return alternativeText
+    ? `${primary} [Alternative: ${alternativeText}]`
+    : primary;
+}
+
+function formatOfficialIngredientVariant(ingredient: unknown): string {
+  const quantity = formatOfficialQuantity(getRecord(ingredient, "quantity"));
+
+  const text = [
+    quantity,
+    getString(ingredient, "unitNotation"),
+    getString(ingredient, "ingredientNotation"),
+    getString(ingredient, "preparation")
+  ]
+    .filter((value) => value !== undefined && value !== "")
     .join(" ")
     .replace(/\s+,/g, ",");
+
+  const optional = isRecord(ingredient) && ingredient.optional === true;
+
+  return optional
+    ? `${text} [Optional]`
+    : text;
+}
+
+function formatOfficialQuantity(quantity: unknown): string | undefined {
+  const value = getNumber(quantity, "value");
+
+  if (value !== undefined) {
+    return String(value);
+  }
+
+  const from = getNumber(quantity, "from");
+  const to = getNumber(quantity, "to");
+
+  if (from !== undefined && to !== undefined) {
+    return from === to
+      ? String(from)
+      : `${from}–${to}`;
+  }
+
+  if (from !== undefined) {
+    return `from=${from}`;
+  }
+
+  if (to !== undefined) {
+    return `to=${to}`;
+  }
+
+  return undefined;
+}
+
+function getOfficialTimeSeconds(
+  recipe: RecipeObject,
+  type: string
+): number | undefined {
+  const time = getArray(recipe, "times")
+    .find((item) => getString(item, "type") === type);
+
+  return getNumber(getRecord(time, "quantity"), "value");
+}
+
+function formatOfficialNutrition(recipe: RecipeObject): string[] {
+  const lines: string[] = [];
+
+  const nutrientMappings = [
+    ["kcal", "calories"],
+    ["carb2", "carbohydrate"],
+    ["fat", "fat"],
+    ["protein", "protein"]
+  ] as const;
+
+  for (const group of getArray(recipe, "nutritionGroups")) {
+    const groupName = cleanText(getString(group, "name") ?? "");
+
+    for (const serving of getArray(group, "recipeNutritions")) {
+      const nutrients = getArray(serving, "nutritions");
+      const parts: string[] = [];
+
+      for (const [sourceType, targetName] of nutrientMappings) {
+        const nutrient = nutrients.find(
+          (item) => getString(item, "type") === sourceType
+        );
+
+        if (!nutrient) continue;
+
+        const number = getNumber(nutrient, "number");
+        if (number === undefined) continue;
+
+        const unit = getString(nutrient, "unittype");
+
+        parts.push(
+          `${targetName} ${number}${unit ? ` ${unit}` : ""}`
+        );
+      }
+
+      if (!parts.length) continue;
+
+      const quantity = getNumber(serving, "quantity");
+      const unitNotation = getString(serving, "unitNotation");
+
+      const basis = [
+        quantity !== undefined ? String(quantity) : undefined,
+        unitNotation
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      lines.push(
+        `- ${groupName ? `${groupName} — ` : ""}${basis ? `${basis}: ` : ""}${parts.join("; ")}`
+      );
+    }
+  }
+
+  return lines;
 }
 
 function getStepText(step: unknown): string {

@@ -8,6 +8,7 @@ import { normalizeRecipeInput } from "../../recipes/normalize.js";
 import { formatRecipeTerminal } from "../../recipes/printer.js";
 import { browserLoginForMonsieurCuisine } from "../../mc/browser-login.js";
 import { MonsieurCuisineSmartClient } from "../../mc/client.js";
+import { MonsieurCuisineApiError } from "../../mc/errors.js";
 import { createSmartRecipePayload } from "../../recipes/payload.js";
 import { CookieAuthProvider } from "../../mc/auth.js";
 import type { AuthProvider } from "../../mc/auth.js";
@@ -24,7 +25,16 @@ export class MonsieurCuisineAdapter implements DeviceAdapter<RecipeInput, SmartR
   }
 
   getPromptInstructions(locale: string, options?: DevicePromptOptions) {
-    return buildRecipeInstructions(locale as SupportedLocale, options?.excludeModes as Parameters<typeof buildRecipeInstructions>[1]);
+    const sourcePolicy =
+      options?.sourcePolicy === "machine-fidelity"
+        ? "machine-fidelity"
+        : "adapt";
+
+    return buildRecipeInstructions(
+      locale as SupportedLocale,
+      options?.excludeModes as Parameters<typeof buildRecipeInstructions>[1],
+      sourcePolicy
+    );
   }
 
   validateInput(input: unknown) {
@@ -152,9 +162,33 @@ export class MonsieurCuisineAdapter implements DeviceAdapter<RecipeInput, SmartR
       detailsImageMediaId = uploadedImage.detailsMediaId;
     }
 
-    const uploadPayload = createSmartRecipePayload({ ...options.recipeInput, thumbnailMediaId, detailsImageMediaId });
+    let uploadPayload = createSmartRecipePayload({ ...options.recipeInput, thumbnailMediaId, detailsImageMediaId });
     logger.info({ title: uploadPayload.title }, "creating Monsieur Cuisine draft");
-    const draft = await client.createRecipe(uploadPayload, { locale });
+
+    let draft;
+    try {
+      draft = await client.createRecipe(uploadPayload, { locale });
+    } catch (error) {
+      if (
+        error instanceof MonsieurCuisineApiError &&
+        error.code === 40008 &&
+        uploadPayload.categoryIds.length > 0
+      ) {
+        logger.warn(
+          { categoryIds: uploadPayload.categoryIds },
+          "Monsieur Cuisine rejected recipe categories; retrying without categories"
+        );
+
+        uploadPayload = {
+          ...uploadPayload,
+          categoryIds: []
+        };
+
+        draft = await client.createRecipe(uploadPayload, { locale });
+      } else {
+        throw error;
+      }
+    }
     const id = typeof draft === "object" && draft && "id" in draft ? Number((draft as { id: unknown }).id) : undefined;
     const recipeUrl = id ? client.recipeUrl(id, locale) : undefined;
 

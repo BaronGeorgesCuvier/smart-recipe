@@ -13,6 +13,7 @@ import type { PromptModeType } from "../recipes/types.js";
 import type { RecipeImageProvider } from "./images.js";
 import type { DeviceAdapter } from "../devices/adapter.js";
 import { MonsieurCuisineAdapter } from "../devices/mc/adapter.js";
+import { readGeneratedRecipeCache, writeGeneratedRecipeCache } from "./generation-cache.js";
 
 export interface ImportRecipeFromUrlOptions {
   url: string;
@@ -66,6 +67,7 @@ export interface GenerateSmartRecipeResult {
   page: RetrievedRecipePage;
   recipeInput: unknown;
   payload: unknown;
+  cacheHit: boolean;
 }
 
 // ─── Upload-only options ──────────────────────────────────────────────────────
@@ -101,7 +103,41 @@ export async function generateSmartRecipe(options: GenerateSmartRecipeOptions): 
   const locale = options.locale ?? "de-DE";
   const adapter = options.adapter ?? new MonsieurCuisineAdapter();
 
-  logger.info({ model: options.openAIModel, reasoning: options.reasoningEffort }, "generating Smart recipe");
+  const cacheOptions = {
+    page: options.page,
+    locale,
+    model: options.openAIModel ?? process.env.GEMINI_MODEL ?? "gemini-3.5-flash",
+    reasoningEffort:
+      options.reasoningEffort ??
+      process.env.GEMINI_REASONING_EFFORT ??
+      process.env.OPENAI_REASONING_EFFORT ??
+      "medium",
+    excludeModes: options.excludeModes,
+    adapter
+  };
+
+  const cachedRecipeInput = readGeneratedRecipeCache(cacheOptions);
+
+  if (cachedRecipeInput !== undefined) {
+    logger.info(
+      { url: options.page.finalUrl || options.page.url },
+      "using cached generated recipe"
+    );
+
+    const payload = adapter.createPayload(cachedRecipeInput);
+    return {
+      page: options.page,
+      recipeInput: cachedRecipeInput,
+      payload,
+      cacheHit: true
+    };
+  }
+
+  logger.info(
+    { model: options.openAIModel, reasoning: options.reasoningEffort },
+    "generating Smart recipe"
+  );
+
   const generator = new OpenAIRecipeGenerator({
     model: options.openAIModel,
     reasoningEffort: options.reasoningEffort,
@@ -109,10 +145,17 @@ export async function generateSmartRecipe(options: GenerateSmartRecipeOptions): 
     excludeModes: options.excludeModes,
     adapter
   });
-  const recipeInput = await generator.generate(options.page, { locale, excludeModes: options.excludeModes });
+
+  const recipeInput = await generator.generate(options.page, {
+    locale,
+    excludeModes: options.excludeModes
+  });
+
+  writeGeneratedRecipeCache(cacheOptions, recipeInput);
+
   const payload = adapter.createPayload(recipeInput);
 
-  return { page: options.page, recipeInput, payload };
+  return { page: options.page, recipeInput, payload, cacheHit: false };
 }
 
 // ─── Phase 2: Upload ──────────────────────────────────────────────────────────
