@@ -484,8 +484,9 @@ describe("ThermomixAdapter", () => {
     it("forbids guessed dry-ingredient volume-to-mass conversions", () => {
       const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
       expect(prompt).toContain("UNIT-CONVERSION FIDELITY");
-      expect(prompt).toContain("do not append guessed gram values");
-      expect(prompt).toContain("preserve the scaled source measure");
+      expect(prompt).toContain("Do not convert a dry ingredient volume to grams");
+      expect(prompt).toContain("convert the volume measure itself to mL");
+      expect(prompt).toContain("do not turn them into guessed gram weights");
     });
 
     it("uses Celsius and millilitres for English TM recipes", () => {
@@ -516,9 +517,11 @@ describe("ThermomixAdapter", () => {
 
   describe("Draft listing", () => {
     const originalLocale = process.env.TM_LOCALE;
+    const originalAccountLocale = process.env.TM_ACCOUNT_LOCALE;
 
     beforeEach(() => {
       delete process.env.TM_LOCALE;
+      delete process.env.TM_ACCOUNT_LOCALE;
     });
 
     afterEach(() => {
@@ -527,6 +530,11 @@ describe("ThermomixAdapter", () => {
         delete process.env.TM_LOCALE;
       } else {
         process.env.TM_LOCALE = originalLocale;
+      }
+      if (originalAccountLocale === undefined) {
+        delete process.env.TM_ACCOUNT_LOCALE;
+      } else {
+        process.env.TM_ACCOUNT_LOCALE = originalAccountLocale;
       }
     });
 
@@ -578,7 +586,7 @@ describe("ThermomixAdapter", () => {
       ]);
     });
 
-    it("uses TM_LOCALE when listing drafts", async () => {
+    it("falls back to TM_LOCALE when TM_ACCOUNT_LOCALE is unset", async () => {
       process.env.TM_LOCALE = "en-US";
       const mockRequest = vi.spyOn(CookidooClient.prototype, "request");
       mockRequest.mockResolvedValueOnce([]);
@@ -591,6 +599,24 @@ describe("ThermomixAdapter", () => {
       expect(mockRequest).toHaveBeenCalledWith(expect.objectContaining({
         method: "GET",
         path: "/created-recipes/en-US",
+        responseSchema: expect.any(Object),
+      }));
+    });
+
+    it("prefers TM_ACCOUNT_LOCALE over recipe locale when listing drafts", async () => {
+      process.env.TM_LOCALE = "en-US";
+      process.env.TM_ACCOUNT_LOCALE = "pl-PL";
+      const mockRequest = vi.spyOn(CookidooClient.prototype, "request");
+      mockRequest.mockResolvedValueOnce([]);
+
+      await adapter.listDrafts({
+        cookie: "_oauth2_proxy=foo; v-authenticated=bar",
+        size: 20
+      });
+
+      expect(mockRequest).toHaveBeenCalledWith(expect.objectContaining({
+        method: "GET",
+        path: "/created-recipes/pl",
         responseSchema: expect.any(Object),
       }));
     });
