@@ -285,9 +285,21 @@ export function createCookidooInstructions(input: CookidooRecipeInput): Step[] {
               },
               position: { offset, length: term.length },
             };
+          } else if (m.type === "tts") {
+            modeAnn = {
+              type: "TTS",
+              data: {
+                time: m.time,
+                speed: m.speed,
+                ...(m.temperature !== undefined
+                  ? { temperature: { value: String(m.temperature), unit: "C" as const } }
+                  : {}),
+                ...(m.direction === "CCW" ? { direction: "CCW" as const } : {}),
+              },
+              position: { offset, length: term.length },
+            };
           } else if (m.type === "cook") {
-            // Generic time / temperature / speed operations are TTS annotations.
-            // Cookidoo renders these as tappable controls on custom recipes.
+            // Backward-compatible input alias for heated TTS operations.
             modeAnn = {
               type: "TTS",
               data: {
