@@ -9,7 +9,7 @@ import type { ReasoningEffort } from "../llm/types.js";
 import type { PromptModeType } from "../recipes/types.js";
 import type { RetrievedRecipePage } from "../retriever/types.js";
 
-const CACHE_VERSION = 4;
+const CACHE_VERSION = 5;
 
 type CacheAdapter = Pick<
   DeviceAdapter,
