@@ -30,7 +30,25 @@ export class OpenAIRecipeImageGenerator implements RecipeImageProvider<RecipeInp
   private readonly logger: SmartRecipeLogger;
 
   constructor(options: OpenAIRecipeImageGeneratorOptions = {}) {
-    this.client = options.client ?? new OpenAI();
+    if (!options.client && !process.env.OPENAI_API_KEY) {
+      throw new Error(
+        "OPENAI_API_KEY is required only for optional OpenAI recipe image generation."
+      );
+    }
+
+    if (
+      !options.client &&
+      process.env.GEMINI_API_KEY &&
+      process.env.OPENAI_API_KEY === process.env.GEMINI_API_KEY
+    ) {
+      throw new Error(
+        "OPENAI_API_KEY must not be the same as GEMINI_API_KEY. Recipe generation uses Gemini; OpenAI credentials are only for optional image generation."
+      );
+    }
+
+    this.client = options.client ?? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
     this.model = options.model ?? process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2";
     this.size = options.size ?? process.env.OPENAI_IMAGE_SIZE ?? "1024x1024";
     this.quality = options.quality ?? parseImageQuality(process.env.OPENAI_IMAGE_QUALITY);

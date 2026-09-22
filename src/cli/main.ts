@@ -43,7 +43,7 @@ import { resolveAuthInteractively } from "./auth-workflow.js";
 import { blankLine, colorDim, printError, printHeading, printStatus, printSuccess } from "./terminal.js";
 import {
   decideUpload,
-  ensureOpenAIKey,
+  ensureGeminiKey,
   explicitImageMode,
   resolveExcludedModes,
   resolveImageProvider,
@@ -77,6 +77,7 @@ interface DoctorReport {
   configPath: string;
   localEnvPath: string;
   localEnvExists: boolean;
+  geminiKeyPresent: boolean;
   openAiKeyPresent: boolean;
   cookie: { key: string; present: boolean };
   auth: { checked: boolean; ok: boolean; userId?: unknown; message?: string };
@@ -274,8 +275,8 @@ function addImportOptions(cmd: Command): Command {
     .option("--always-upload", "Always upload without asking for confirmation")
     .option("--full-response", "Print the full result object")
     .option("--no-print-markdown", "Do not pretty-print the retrieved markdown to the console")
-    .option("--model <model>", "OpenAI model", process.env.OPENAI_MODEL ?? "gpt-5.5")
-    .option("--reasoning <effort>", "OpenAI reasoning effort: minimal, low, medium, high", process.env.OPENAI_REASONING_EFFORT ?? "medium")
+    .option("--model <model>", "Gemini recipe model", process.env.GEMINI_MODEL ?? "gemini-3.5-flash")
+    .option("--reasoning <effort>", "Recipe generation reasoning effort: minimal, low, medium, high", process.env.GEMINI_REASONING_EFFORT ?? process.env.OPENAI_REASONING_EFFORT ?? "medium")
     .option("--recreate-image", "Generate a new recipe image with OpenAI instead of uploading the source image")
     .option("--recreate-image-with-source-images", "When recreating the image, send downloaded website images as loose visual context")
     .option("--image-reference-source", "Alias for --recreate-image-with-source-images")
@@ -304,7 +305,7 @@ function addImportOptions(cmd: Command): Command {
 program
   .command("import-url")
   .alias("create")
-  .description("Retrieve a recipe page, generate Smart recipe JSON with OpenAI, and optionally upload a draft.")
+  .description("Retrieve a recipe page, generate Smart recipe JSON with Gemini, and optionally upload a draft.")
   .argument("<url>", "Recipe URL");
 addImportOptions(program.commands.at(-1)!);
 program.commands.at(-1)!.action(async (url, options) => {
@@ -335,7 +336,7 @@ program.commands.at(-1)!.action(async (url, options) => {
 program
   .command("import-file")
   .alias("create-file")
-  .description("Retrieve a recipe from a local text file, generate Smart recipe JSON with OpenAI, and optionally upload a draft.")
+  .description("Retrieve a recipe from a local text file, generate Smart recipe JSON with Gemini, and optionally upload a draft.")
   .argument("<file>", "Recipe file path")
   .option("--title <title>", "Custom recipe title")
   .option("--url <url>", "Original recipe URL context");
@@ -360,7 +361,7 @@ program.commands.at(-1)!.action(async (file, options) => {
 program
   .command("import-stdin")
   .alias("create-stdin")
-  .description("Retrieve a recipe from stdin, generate Smart recipe JSON with OpenAI, and optionally upload a draft.")
+  .description("Retrieve a recipe from stdin, generate Smart recipe JSON with Gemini, and optionally upload a draft.")
   .option("--title <title>", "Custom recipe title")
   .option("--url <url>", "Original recipe URL context");
 addImportOptions(program.commands.at(-1)!);
@@ -418,7 +419,7 @@ async function runImport(
   const targetLocale = targetLocaleResult.locale;
   wasPrompted = wasPrompted || targetLocaleResult.prompted;
 
-  await ensureOpenAIKey(isInteractive, GLOBAL_ENV_PATH);
+  await ensureGeminiKey(isInteractive, GLOBAL_ENV_PATH);
 
   // ── Step 2: Generate the recipe ───────────────────────────────────────────
   // Image provider is resolved later (Step 4.5), after the user confirms upload.
@@ -426,7 +427,7 @@ async function runImport(
   const excludeModes = resolveExcludedModes(targetDevice, options);
 
   const generated: GenerateSmartRecipeResult = await withCliSpinner(
-    "Generating recipe with OpenAI...",
+    "Generating recipe with Gemini...",
     spinnerEnabled,
     () => generateSmartRecipe({
       page,
@@ -442,6 +443,10 @@ async function runImport(
       failureMessage: "Recipe generation failed.",
     }
   );
+
+  if (!isJsonMode && generated.cacheHit) {
+    printSuccess("Using cached recipe — Gemini API not called");
+  }
 
   // ── Step 3: Display the recipe ────────────────────────────────────────────
   if (!isJsonMode) {
@@ -708,6 +713,7 @@ async function buildDoctorReport(device: "mc" | "tm", options: Record<string, un
     configPath: GLOBAL_ENV_PATH,
     localEnvPath: path.resolve(".env"),
     localEnvExists: fs.existsSync(path.resolve(".env")),
+    geminiKeyPresent: Boolean(process.env.GEMINI_API_KEY),
     openAiKeyPresent: Boolean(process.env.OPENAI_API_KEY),
     cookie: {
       key: options.cookie ? "--cookie" : cookieKey,
@@ -731,8 +737,8 @@ async function buildDoctorReport(device: "mc" | "tm", options: Record<string, un
     };
   }
 
-  if (!report.openAiKeyPresent) {
-    report.recommendations.push("Set OPENAI_API_KEY before importing recipes.");
+  if (!report.geminiKeyPresent) {
+    report.recommendations.push("Set GEMINI_API_KEY before importing recipes.");
   }
   if (!cookie) {
     report.recommendations.push(`Run smart-recipe login-browser --device ${device} --save to create a saved session.`);

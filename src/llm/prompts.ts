@@ -6,7 +6,7 @@ import type { RetrievedRecipePage } from "../retriever/types.js";
 import type { PromptModeType } from "../recipes/types.js";
 import { getLocalePromptGuidance } from "./locale-guidance.js";
 
-export function buildRecipeInstructions(
+function buildAdaptRecipeInstructions(
   locale: SupportedLocale = "de-DE",
   excludeModes: PromptModeType[] = [],
 ): string {
@@ -114,6 +114,72 @@ const MODE_CAPABILITY_LABELS: Partial<Record<PromptModeType, string>> = {
   liquidDoughKnead: "Smart dough modes",
   manualCooking: "manual cooking",
 };
+
+export type RecipeSourcePolicy = "adapt" | "machine-fidelity";
+
+export function buildRecipeInstructions(
+  locale: SupportedLocale = "de-DE",
+  excludeModes: PromptModeType[] = [],
+  sourcePolicy: RecipeSourcePolicy = "adapt",
+): string {
+  if (sourcePolicy === "machine-fidelity") {
+    return buildMachineFidelityInstructions(locale, excludeModes);
+  }
+
+  return buildAdaptRecipeInstructions(locale, excludeModes);
+}
+
+function buildMachineFidelityInstructions(
+  locale: SupportedLocale,
+  excludeModes: PromptModeType[] = [],
+): string {
+  const localeGuidance = getLocalePromptGuidance(locale);
+
+  return [
+    "Convert this already-tested machine recipe into Monsieur Cuisine Smart recipe input JSON.",
+    "SOURCE POLICY: MACHINE-FIDELITY. The source recipe is authoritative. Adapt only what is technically required by Monsieur Cuisine hardware or the target JSON schema.",
+
+    excludeModes.length > 0
+      ? `The following modes are unavailable and MUST NOT be used: ${excludeModes.join(", ")}.`
+      : "",
+
+    `Use ${localeGuidance.outputLanguage} for user-facing fields and set settings.locale to ${localeGuidance.locale}. Translate faithfully without changing culinary meaning.`,
+
+    "INGREDIENT FIDELITY: Preserve every source ingredient quantity, unit, range, preparation qualifier and optional/alternative ingredient. Do not normalize amounts to package sizes, shopping quantities, gross/net estimates, trimming loss or convenient round numbers.",
+
+    "If the target schema has no dedicated field for an alternative ingredient, preserve the alternative clearly in the ingredient name or visible instruction instead of discarding it.",
+
+    "YIELD FIDELITY: Preserve the source serving/yield exactly when representable. Never silently reduce the recipe. If the model-facing schema cannot represent a source yield above its maximum, keep all ingredient quantities unchanged and represent it as one localized batch whose label includes the original yield.",
+
+    "STEP FIDELITY: Preserve source step order and ingredient-addition order. Do not reorder, combine, optimize, pre-cut, dry-first, bloom spices, alter liquid levels, alter gross/net quantities or otherwise redesign an already-tested source workflow unless Monsieur Cuisine physically requires the change.",
+
+    "MACHINE SETTINGS: Preserve explicit source time, temperature, speed and reverse direction whenever Monsieur Cuisine can reproduce them. Prefer equivalent manual cooking settings over substituting Turbo, Roast or another automatic mode.",
+
+    "UNREPRESENTABLE SETTINGS: Never silently replace a source setting with a materially different one. If a source operation such as a gradual speed ramp cannot be represented exactly by one automatic device setting, preserve the operation as a visible manual instruction/fallback rather than inventing a fixed approximate speed.",
+
+    "THERMOMIX VAROMA: Thermomix Varoma timing starts immediately. When a source Varoma step begins with cold or room-temperature water, preserve the source timed duration and use Monsieur Cuisine Steam without additional preheating time. If the source already starts with hot or boiling liquid, preserve that actual state.",
+
+    "SIMULTANEOUS COOKING: Preserve simultaneous bowl, basket and steamer cooking when the source uses it. Do not split it into sequential cooking unless Monsieur Cuisine hardware makes that unavoidable.",
+
+    "ACCESSORIES AND PLACEMENT: Preserve which ingredients belong in the bowl, simmering basket, steamer levels or other accessories. Preserve operational details such as placement, orientation, measuring-cup removal, splash-guard use, resting and removal instructions.",
+
+    "TARGET UI CONSTRAINT: Automatic cooking modes cannot carry normal descriptive instructions. When necessary, place ingredient-addition or human-action instructions in an immediately preceding visible manual step, followed by the automatic cooking step. This display split must not change the culinary sequence.",
+
+    "SCALE FIDELITY: Use the Monsieur Cuisine built-in scale for gram-denominated ingredients, but never sum multiple ingredient weights into one artificial target. Each exact gram ingredient must have its own scale step in source order. Teaspoons, tablespoons, pinches and other non-gram quantities must not contribute to a gram scale target. For a source gram range A-B, create one scale step targeting A, the minimum valid source amount. Keep the full A-B range in the ingredient list, but do not create a second weighing or manual step solely for the optional remainder. Do not combine unrelated human actions such as scraping down or accessory handling into a scale step; keep those in a separate visible manual step. A scale step must occur while the machine is idle. Splitting weighing from a following cooking action is allowed, but ingredient quantities and culinary order must remain unchanged.",
+
+    "SAFETY: Add only device-required safety handling that does not materially alter the source recipe. Do not use generic adaptation rules to change a tested source process.",
+
+    "NUTRITION: If the source provides nutrition, preserve those values rather than estimating replacements. If nutrition is absent, estimate calories, carbohydrate, fat and protein per source serving from the exact listed ingredient quantities. Ignore undefined to-taste amounts and non-caloric water/salt; account for other energy sources such as alcohol. Return sensible rounded whole numbers required by the target schema.",
+
+    "METADATA: Preserve source preparation time, total time, difficulty and serving information when present. If a mandatory target field is absent from the source, use the most conservative value that can be inferred without changing the recipe.",
+
+    "Do not invent ingredient properties absent from the source. Do not silently omit source quantities, ranges, alternatives, machine settings, accessory placement or safety-relevant instructions.",
+
+    "Before returning JSON, internally compare the generated Monsieur Cuisine recipe against every source machine step and verify that any deviation is required by target-device limitations rather than generic recipe optimization."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 function buildCapabilityLine(excludeModes: PromptModeType[]): string {
   if (excludeModes.length === 0) {

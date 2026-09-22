@@ -1,8 +1,11 @@
 import OpenAI from "openai";
 import type { RetrievedRecipePage } from "../retriever/types.js";
 import type { RecipeInput } from "../recipes/schema.js";
+import { applyCookidooSpeedRamps } from "../recipes/cookidoo-speed-ramp.js";
+import { validateCookidooScaleSteps } from "../recipes/cookidoo-scale-fidelity.js";
 import type { RecipeGenerationOptions, RecipeGenerator } from "./types.js";
 import { makeOpenAIStrictSchema } from "./schema-format.js";
+import { detectRecipeSource } from "../sources/index.js";
 import { getArray, getRecord, getString } from "../utils/unknown.js";
 import type { ReasoningEffort } from "./types.js";
 
@@ -18,10 +21,13 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
   private readonly defaults: GenerationDefaults;
 
   constructor(options: OpenAIRecipeGeneratorOptions) {
-    this.client = options.client ?? new OpenAI();
+    this.client = options.client ?? new OpenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    });
     this.defaults = {
-      model: options.model ?? process.env.OPENAI_MODEL ?? "gpt-5.5",
-      reasoningEffort: options.reasoningEffort ?? parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT),
+      model: options.model ?? process.env.GEMINI_MODEL ?? "gemini-3.5-flash",
+      reasoningEffort: options.reasoningEffort ?? parseReasoningEffort(process.env.GEMINI_REASONING_EFFORT ?? process.env.OPENAI_REASONING_EFFORT),
       locale: options.locale ?? "de-DE",
       maxCorrectionAttempts: options.maxCorrectionAttempts ?? 3,
       excludeModes: options.excludeModes ?? [],
@@ -41,14 +47,48 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
     let feedback: { errors: string[]; previous: unknown } | undefined;
 
     const adapter = finalOptions.adapter;
+    const detectedSource = detectRecipeSource(page.finalUrl || page.url);
+    const useCookidooFidelityFixes =
+      adapter.id === "mc" &&
+      detectedSource.type === "cookidoo-official";
 
     for (let attempt = 0; attempt <= finalOptions.maxCorrectionAttempts; attempt += 1) {
       const output = await this.generateOnce(page, finalOptions, feedback);
       const validation = adapter.validateInput(output);
       const excludedErrors = validateExcludedModes(output, finalOptions.excludeModes);
-      const allErrors = [...validation.errors, ...excludedErrors];
-      if (validation.ok && excludedErrors.length === 0) {
-        return adapter.normalizeInput(output) as RecipeInput;
+      const scaleErrors = useCookidooFidelityFixes
+        ? validateCookidooScaleSteps(output, page.markdown)
+        : [];
+      const allErrors = [
+        ...validation.errors,
+        ...excludedErrors,
+        ...scaleErrors
+      ];
+      if (
+        validation.ok &&
+        excludedErrors.length === 0 &&
+        scaleErrors.length === 0
+      ) {
+        const normalized =
+          adapter.normalizeInput(output) as RecipeInput;
+
+        const finalized = useCookidooFidelityFixes
+          ? applyCookidooSpeedRamps(normalized, page.markdown)
+          : normalized;
+
+        const finalValidation =
+          adapter.validateInput(finalized);
+
+        if (finalValidation.ok) {
+          return finalized;
+        }
+
+        feedback = {
+          errors: finalValidation.errors,
+          previous: finalized
+        };
+
+        continue;
       }
       feedback = { errors: allErrors, previous: output };
     }
@@ -78,52 +118,56 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
       ].join("\n")
       : "";
 
-    const response = await this.client.responses.create({
+    const detectedSource = detectRecipeSource(page.finalUrl || page.url);
+    const sourcePolicy =
+      detectedSource.type === "cookidoo-official"
+        ? "machine-fidelity"
+        : "adapt";
+
+    const response = await this.client.chat.completions.create({
       model: options.model,
-      reasoning: { effort: options.reasoningEffort },
-      text: {
-        format: {
-          type: "json_schema",
-          name: adapter.id === "tm" ? "thermomix_cookidoo_recipe" : "monsieur_cuisine_smart_recipe",
-          strict: true,
-          description: adapter.id === "tm" ? "Model-friendly Thermomix Cookidoo recipe input." : "Model-friendly Monsieur Cuisine Smart recipe input.",
-          schema: strictSchema
-        }
-      },
-      instructions: adapter.getPromptInstructions(options.locale, options),
-      input: [
+      messages: [
+        {
+          role: "system",
+          content: adapter.getPromptInstructions(options.locale, {
+              ...options,
+              sourcePolicy
+            })
+        },
         {
           role: "user",
           content: [
-            {
-              type: "input_text",
-              text: [
-                `Source URL: ${page.finalUrl || page.url}`,
-                `Detected title: ${page.title}`,
-                `Preferred locale: ${options.locale}`,
-                "",
-                "Full schema with detailed descriptions:",
-                fullSchemaText,
-                correctionText,
-                "",
-                "Recipe page as Markdown:",
-                page.markdown
-              ].filter(Boolean).join("\n")
-            },
-            ...page.images
-              .filter((image) => image.dataUrl)
-              .slice(0, 3)
-              .map((image, index) => ({
-                type: "input_image" as const,
-                image_url: image.dataUrl,
-                detail: index === 0 ? "high" as const : "low" as const
-              }))
-          ]
+            `Source URL: ${page.finalUrl || page.url}`,
+            `Detected title: ${page.title}`,
+            `Preferred locale: ${options.locale}`,
+            "",
+            "Full schema with detailed descriptions:",
+            fullSchemaText,
+            correctionText,
+            "",
+            "Recipe page as Markdown:",
+            page.markdown
+          ].filter(Boolean).join("\n")
         }
-      ]
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: adapter.id === "tm"
+            ? "thermomix_cookidoo_recipe"
+            : "monsieur_cuisine_smart_recipe",
+          strict: true,
+          schema: strictSchema
+        }
+      }
     });
 
-    return JSON.parse(response.output_text);
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("Gemini bos cevap dondurdu.");
+    }
+
+    return JSON.parse(content);
   }
 }
 
