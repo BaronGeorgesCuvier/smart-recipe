@@ -1,5 +1,5 @@
 import process from "node:process";
-import { upsertDotEnvValue } from "../config/env.js";
+import { getTmAccountLocale, upsertDotEnvValue } from "../config/env.js";
 import { CookieAuthProvider, type AuthProvider } from "../mc/auth.js";
 import type { DeviceAdapter } from "../devices/adapter.js";
 import type { SupportedLocale } from "../catalogs/types.js";
@@ -28,6 +28,9 @@ type CliAuthAdapter = DeviceAdapter & {
 };
 
 function envLocale(key: string): SupportedLocale {
+  if (key === "TM_ACCOUNT_LOCALE") {
+    return getTmAccountLocale("de-DE") as SupportedLocale;
+  }
   return (process.env[key] ?? "de-DE") as SupportedLocale;
 }
 
