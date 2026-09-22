@@ -5,7 +5,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { Command, Help, Option } from "commander";
 import fs from "node:fs";
-import { loadDotEnv, upsertDotEnvValue, getTmVersion, getTmLocale, mcHasFoodProcessor } from "../config/env.js";
+import { loadDotEnv, upsertDotEnvValue, getTmVersion, getTmLocale, getTmAccountLocale, mcHasFoodProcessor } from "../config/env.js";
 import { categoryPromptText, plannedLocales, supportedLocales } from "../catalogs/index.js";
 import { MonsieurCuisineApiError } from "../mc/errors.js";
 import { CookidooError } from "../devices/tm/errors.js";
@@ -56,7 +56,8 @@ import {
   getOrPromptTargetLocale,
   sourceCookiesFromOptions,
   sourceDeviceForType,
-  sourceLocaleFromOptions
+  sourceLocaleFromOptions,
+  tmAccountLocaleFromOptions
 } from "./settings.js";
 import {
   formatCliError,
@@ -82,7 +83,7 @@ interface DoctorReport {
   cookie: { key: string; present: boolean };
   auth: { checked: boolean; ok: boolean; userId?: unknown; message?: string };
   recommendations: string[];
-  tm?: { locale: string; version: string };
+  tm?: { locale: string; accountLocale: string; version: string };
   mc?: { foodProcessor: boolean };
 }
 
@@ -132,6 +133,7 @@ const optionCategories: Record<string, string> = {
   "--locale": "Device & Target Settings",
   "--language": "Device & Target Settings",
   "--source-locale": "Device & Target Settings",
+  "--cookidoo-locale": "Device & Target Settings",
   "--tm-version": "Device & Target Settings",
   "--mc-food-processor": "Device & Target Settings",
   "--exclude-modes": "Device & Target Settings",
@@ -291,6 +293,7 @@ function addImportOptions(cmd: Command): Command {
     .option("--locale <locale>", `Target recipe locale/language (${supportedLocales.join(", ")}; two-letter aliases like de/en/fr are accepted)`)
     .option("--language <locale>", "Alias for --locale")
     .option("--source-locale <locale>", "Locale used for authenticated source APIs when the source URL/ID does not include one")
+    .option("--cookidoo-locale <locale>", "Cookidoo account/market locale for authentication and Created Recipes upload (e.g. pl-PL); independent from --locale recipe language")
     .option("--source-cookie <cookie>", "Cookie header for authenticated source recipe ingestion")
     .option("--mc-source-cookie <cookie>", "Monsieur Cuisine source Cookie header")
     .option("--tm-source-cookie <cookie>", "Cookidoo/Thermomix source Cookie header")
@@ -418,6 +421,9 @@ async function runImport(
   const targetLocaleResult = await getOrPromptTargetLocale(targetDevice, options, isInteractive, GLOBAL_ENV_PATH);
   const targetLocale = targetLocaleResult.locale;
   wasPrompted = wasPrompted || targetLocaleResult.prompted;
+  const uploadLocale = targetDevice === "tm"
+    ? tmAccountLocaleFromOptions(options)
+    : targetLocale;
 
   await ensureGeminiKey(isInteractive, GLOBAL_ENV_PATH);
 
@@ -488,7 +494,7 @@ async function runImport(
     uploadResult = await uploadSmartRecipe({
       page: generated.page,
       recipeInput: generated.recipeInput,
-      locale: targetLocale,
+      locale: uploadLocale,
       cookie: typeof activeCookie === "string" ? activeCookie : undefined,
       authProvider,
       imageProvider,
@@ -528,7 +534,7 @@ async function runImport(
       uploadResult = await uploadSmartRecipe({
         page: generated.page,
         recipeInput: generated.recipeInput,
-        locale: targetLocale,
+        locale: uploadLocale,
         cookie: newCookie,
         authProvider,
         imageProvider,
@@ -660,7 +666,7 @@ async function resolveCookieForDevice(device: "mc" | "tm", options: Record<strin
 
     printStatus("Signing in to Cookidoo without browser...");
     const result = await adapter.passwordLogin({
-      locale: getTmLocale("de-DE"),
+      locale: getTmAccountLocale("de-DE"),
       credentials: {
         email,
         password: cookidooPassword,
@@ -729,6 +735,7 @@ async function buildDoctorReport(device: "mc" | "tm", options: Record<string, un
   if (device === "tm") {
     report.tm = {
       locale: getTmLocale("de-DE"),
+      accountLocale: getTmAccountLocale("de-DE"),
       version: getTmVersion("tm6")
     };
   } else {
@@ -824,7 +831,7 @@ program
     const device = await resolveCommandDevice(options);
     const adapter = getDeviceAdapter(device);
     const cookieKey = adapter.id === "tm" ? "TM_COOKIE" : "MC_COOKIE";
-    const localeKey = adapter.id === "tm" ? "TM_LOCALE" : "MC_LOCALE";
+    const localeKey = adapter.id === "tm" ? "TM_ACCOUNT_LOCALE" : "MC_LOCALE";
     const loginKey = adapter.id === "tm" ? "TM_LOGIN" : "MC_LOGIN";
     const pwKey = adapter.id === "tm" ? "TM_PW" : "MC_PW";
 
@@ -912,7 +919,7 @@ program
           `Opening ${adapter.deviceName} login browser...`,
           spinnerEnabled,
           (spinner) => adapter.browserLogin({
-            locale: sourceDevice === "tm" ? (process.env.TM_LOCALE ?? "de-DE") : (process.env.MC_LOCALE ?? "de-DE"),
+            locale: sourceDevice === "tm" ? getTmAccountLocale("de-DE") : (process.env.MC_LOCALE ?? "de-DE"),
             browserChannel: process.env.SMART_RECIPE_BROWSER_CHANNEL,
             browserPath: process.env.SMART_RECIPE_BROWSER_PATH,
             browserSandbox: browserSandboxFromEnv(),
