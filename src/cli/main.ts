@@ -298,8 +298,8 @@ function addImportOptions(cmd: Command): Command {
     .option("--device <device>", "Target device: 'mc' or 'tm'")
     .option("--tm-version <version>", "Target Thermomix model: 'tm7', 'tm6', or 'tm5'")
     .option("--mc-food-processor <boolean>", "Whether you own the Monsieur Cuisine food processor attachment (true/false)")
-    .option("--extend-tm-modes", "Enable TM modes not supported in My Creations (e.g. the cook/simmer mode). These will show as red in the Cookidoo editor.")
-    .option("--experimental-tm-modes", "Alias for --extend-tm-modes.");
+    .option("--extend-tm-modes", "Legacy compatibility flag. Generic TM cook/simmer steps are emitted as TTS controls automatically.")
+    .option("--experimental-tm-modes", "Legacy alias for --extend-tm-modes.");
 }
 
 program
