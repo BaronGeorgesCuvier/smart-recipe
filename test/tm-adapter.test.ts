@@ -167,6 +167,37 @@ describe("ThermomixAdapter", () => {
       expect(annotations![1].name).toBe("blend"); // "blend speed 6 for 30s" comes second
     });
 
+    it("emits tappable TTS annotations for time-speed operations without temperature", () => {
+      const inputTts: CookidooRecipeInput = {
+        ...sampleInput,
+        steps: [
+          {
+            text: "Chop onion 5 s/speed 5.",
+            modeAnnotations: [
+              {
+                matchedSubstring: "5 s/speed 5",
+                mode: {
+                  type: "tts",
+                  time: 5,
+                  speed: "5"
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const payload = adapter.createPayload(inputTts);
+      const annotation = payload.instructions[0].annotations![0];
+
+      expect(annotation.type).toBe("TTS");
+      expect(annotation.name).toBeUndefined();
+      expect(annotation.data).toEqual({
+        time: 5,
+        speed: "5"
+      });
+    });
+
     it("emits tappable TTS annotations for generic time-temperature-speed cooking", () => {
       const inputCook: CookidooRecipeInput = {
         ...sampleInput,
@@ -344,6 +375,13 @@ describe("ThermomixAdapter", () => {
       const prompt = adapter.getPromptInstructions("de-DE", { version: "TM5" });
       expect(prompt).toContain("Target: Thermomix (TM5)");
       expect(prompt).toContain("Target device is TM5");
+    });
+
+    it("tells the model to use generic TTS and not invent source details", () => {
+      const prompt = adapter.getPromptInstructions("pl-PL", { tmVersion: "tm7" });
+      expect(prompt).toContain("TTS: Generic tappable Time/Temperature/Speed control");
+      expect(prompt).toContain("Do NOT invent ingredient preparation details");
+      expect(prompt).toContain("Never invent them");
     });
 
     it("generates instructions targeting TM7 when specified", () => {
