@@ -421,8 +421,16 @@ describe("ThermomixAdapter", () => {
   describe("Prompt Instructions Versioning", () => {
     const originalEnv = process.env.TM_VERSION;
 
+    beforeEach(() => {
+      delete process.env.TM_VERSION;
+    });
+
     afterEach(() => {
-      process.env.TM_VERSION = originalEnv;
+      if (originalEnv === undefined) {
+        delete process.env.TM_VERSION;
+      } else {
+        process.env.TM_VERSION = originalEnv;
+      }
     });
 
     it("generates instructions targeting TM6 by default", () => {
@@ -464,9 +472,19 @@ describe("ThermomixAdapter", () => {
   });
 
   describe("Draft listing", () => {
+    const originalLocale = process.env.TM_LOCALE;
+
+    beforeEach(() => {
+      delete process.env.TM_LOCALE;
+    });
+
     afterEach(() => {
       vi.restoreAllMocks();
-      delete process.env.TM_LOCALE;
+      if (originalLocale === undefined) {
+        delete process.env.TM_LOCALE;
+      } else {
+        process.env.TM_LOCALE = originalLocale;
+      }
     });
 
     it("maps Cookidoo created-recipes items responses", async () => {
