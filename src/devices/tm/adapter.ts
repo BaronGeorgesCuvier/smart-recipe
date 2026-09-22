@@ -208,6 +208,11 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
           } else if (m.type === "warmUp") {
             params.push(`${m.temperature}°C`);
             params.push(`Speed ${m.speed}`);
+          } else if (m.type === "tts" || m.type === "cook") {
+            params.push(`${m.time}s`);
+            if (m.temperature !== undefined) params.push(`${m.temperature}°C`);
+            params.push(`Speed ${m.speed}`);
+            if (m.direction) params.push(m.direction);
           } else if (m.type === "steaming") {
             params.push(`${m.time}s`);
             params.push(`Speed ${m.speed}`);
@@ -218,7 +223,8 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
             params.push(`${m.temperature}°C`);
             if (m.power) params.push(m.power);
           }
-          parts.push(`      ${ansi.bold}${ansi.brightYellow}[Mode: ${m.type} | "${ann.matchedSubstring}"${params.length > 0 ? " | " + params.join(", ") : ""}]${ansi.reset}`);
+          const modeLabel = m.type === "tts" || m.type === "cook" ? "TTS" : `Mode: ${m.type}`;
+          parts.push(`      ${ansi.bold}${ansi.brightYellow}[${modeLabel} | "${ann.matchedSubstring}"${params.length > 0 ? " | " + params.join(", ") : ""}]${ansi.reset}`);
         }
       }
 
