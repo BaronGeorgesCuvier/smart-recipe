@@ -3,6 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
+import { createHash, randomBytes } from "node:crypto";
 import { chromium, type BrowserContext } from "playwright";
 import { CookidooError } from "./errors.js";
 import { getErrorMessage } from "../../utils/unknown.js";
@@ -149,54 +150,215 @@ export async function browserLoginForCookidoo(options: BrowserLoginOptions = {})
 
 export async function passwordLoginForCookidoo(options: PasswordLoginOptions): Promise<BrowserLoginResult> {
   const locale = options.locale ?? "de-DE";
-  const { domain, langPath } = getLocaleDomainMapping(locale);
+  const { langPath } = getLocaleDomainMapping(locale);
   const fetchImpl = options.fetch ?? fetch;
   const jar = new SimpleCookieJar();
-  const startUrl = `https://${domain}/profile/${langPath}/login?redirectAfterLogin=%2Ffoundation%2F${langPath}%2Ffor-you`;
 
-  const loginPage = await fetchWithRedirects(fetchImpl, jar, startUrl);
-  const existingCookie = jar.cookidooAuthHeader(domain);
-  if (existingCookie) {
-    return {
-      cookie: existingCookie,
-      source: "cookidoo-password",
-      cookieNames: jar.cookieNames(),
-    };
+  const oidcRes = await fetchImpl(
+    "https://ciam.prod.cookidoo.vorwerk-digital.com/.well-known/openid-configuration",
+    { headers: { "User-Agent": LOGIN_USER_AGENT } }
+  );
+  if (!oidcRes.ok) {
+    throw new CookidooError({
+      message: `Cookidoo OIDC discovery failed [${oidcRes.status}]`,
+      status: oidcRes.status,
+      body: await oidcRes.text(),
+      url: oidcRes.url,
+      method: "GET",
+    });
   }
 
+  const oidc = await oidcRes.json() as {
+    authorization_endpoint?: string;
+    token_endpoint?: string;
+  };
+  if (!oidc.authorization_endpoint || !oidc.token_endpoint) {
+    throw new CookidooError({
+      message: "Cookidoo OIDC discovery response is missing authorization/token endpoints.",
+      status: 502,
+      body: oidc,
+      url: oidcRes.url,
+      method: "GET",
+    });
+  }
+
+  const clientId = "mobile-android";
+  const redirectUri = "com.vorwerk.cookidoo://code-grant";
+  const verifier = base64Url(randomBytes(48));
+  const challenge = base64Url(createHash("sha256").update(verifier).digest());
+  const state = base64Url(randomBytes(18));
+  const market = marketFromLocale(locale);
+
+  const authorizeUrl = new URL(oidc.authorization_endpoint);
+  authorizeUrl.searchParams.set("response_type", "code");
+  authorizeUrl.searchParams.set("client_id", clientId);
+  authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+  authorizeUrl.searchParams.set("market", market);
+  authorizeUrl.searchParams.set("scope", "openid profile email offline offline_access");
+  authorizeUrl.searchParams.set("state", state);
+  authorizeUrl.searchParams.set("code_challenge", challenge);
+  authorizeUrl.searchParams.set("code_challenge_method", "S256");
+  authorizeUrl.searchParams.set("ui_locales", langPath.split("-")[0] ?? "en");
+
+  const loginPage = await fetchWithRedirects(fetchImpl, jar, authorizeUrl.toString());
   const requestId = extractCookidooRequestId(loginPage.body);
 
-  const form = new URLSearchParams({
+  const code = await submitCookidooCredentialsForCode({
+    fetchImpl,
+    jar,
     requestId,
-    username: options.credentials.email,
+    email: options.credentials.email,
     password: options.credentials.password,
+    state,
+    redirectUri,
   });
 
-  await fetchWithRedirects(fetchImpl, jar, "https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login", {
+  const tokenBody = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: redirectUri,
+    code_verifier: verifier,
+    client_id: clientId,
+  });
+  const tokenRes = await fetchImpl(oidc.token_endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      Referer: loginPage.url,
+      "User-Agent": LOGIN_USER_AGENT,
     },
-    body: form,
+    body: tokenBody,
   });
+  const tokenText = await tokenRes.text();
+  let tokenPayload: unknown;
+  try {
+    tokenPayload = JSON.parse(tokenText);
+  } catch {
+    tokenPayload = tokenText;
+  }
 
-  const cookie = jar.cookidooAuthHeader(domain);
-  if (!cookie) {
+  const accessToken =
+    tokenPayload && typeof tokenPayload === "object" && "access_token" in tokenPayload
+      ? String((tokenPayload as { access_token?: unknown }).access_token ?? "")
+      : "";
+
+  if (!tokenRes.ok || !accessToken) {
     throw new CookidooError({
-      message: "Cookidoo password login did not return authenticated session cookies.",
-      status: 401,
-      body: { cookieNames: jar.cookieNames() },
-      url: startUrl,
+      message: `Cookidoo OAuth token exchange failed [${tokenRes.status}]`,
+      status: tokenRes.status,
+      body: tokenPayload,
+      url: oidc.token_endpoint,
       method: "POST",
     });
   }
 
   return {
-    cookie,
+    cookie: `Bearer ${accessToken}`,
     source: "cookidoo-password",
-    cookieNames: jar.cookieNames(),
+    cookieNames: ["access_token"],
   };
+}
+
+const LOGIN_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+function marketFromLocale(locale: string): string {
+  const normalized = locale.trim().toLowerCase();
+  const region = normalized.split(/[-_]/)[1];
+  if (region) return region.toLowerCase();
+  if (normalized.startsWith("de")) return "de";
+  if (normalized.startsWith("pl")) return "pl";
+  if (normalized.startsWith("fr")) return "fr";
+  if (normalized.startsWith("it")) return "it";
+  if (normalized.startsWith("cs") || normalized.startsWith("cz")) return "cz";
+  return "us";
+}
+
+function base64Url(bytes: Uint8Array): string {
+  return Buffer.from(bytes)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+async function submitCookidooCredentialsForCode(options: {
+  fetchImpl: typeof fetch;
+  jar: SimpleCookieJar;
+  requestId: string;
+  email: string;
+  password: string;
+  state: string;
+  redirectUri: string;
+}): Promise<string> {
+  let currentUrl = "https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login";
+  let method = "POST";
+  let body: URLSearchParams | undefined = new URLSearchParams({
+    requestId: options.requestId,
+    username: options.email,
+    password: options.password,
+  });
+
+  for (let redirects = 0; redirects < 12; redirects += 1) {
+    const headers = new Headers({ "User-Agent": LOGIN_USER_AGENT });
+    const cookie = options.jar.headerForUrl(currentUrl);
+    if (cookie) headers.set("Cookie", cookie);
+    if (method === "POST") {
+      headers.set("Content-Type", "application/x-www-form-urlencoded");
+    }
+
+    const res = await options.fetchImpl(currentUrl, {
+      method,
+      headers,
+      body,
+      redirect: "manual",
+    });
+    options.jar.storeFromResponse(currentUrl, res.headers);
+
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      const nextUrl = new URL(location, currentUrl).toString();
+      if (nextUrl.startsWith(options.redirectUri)) {
+        const callback = new URL(nextUrl);
+        if (callback.searchParams.get("state") !== options.state) {
+          throw new CookidooError({
+            message: "Cookidoo OAuth state mismatch.",
+            status: 401,
+            body: undefined,
+            url: nextUrl,
+            method,
+          });
+        }
+        const code = callback.searchParams.get("code");
+        if (code) return code;
+        break;
+      }
+
+      const parsed = new URL(nextUrl);
+      if (parsed.hostname !== "ciam.prod.cookidoo.vorwerk-digital.com") {
+        throw new CookidooError({
+          message: "Cookidoo OAuth login redirected outside the CIAM host.",
+          status: res.status,
+          body: undefined,
+          url: nextUrl,
+          method,
+        });
+      }
+
+      currentUrl = nextUrl;
+      method = "GET";
+      body = undefined;
+      continue;
+    }
+    break;
+  }
+
+  throw new CookidooError({
+    message: "Cookidoo OAuth login did not return an authorization code. Check email and password.",
+    status: 401,
+    body: undefined,
+    url: currentUrl,
+    method,
+  });
 }
 
 async function launchChromiumApp(options: {
