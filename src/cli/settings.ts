@@ -1,5 +1,5 @@
 import process from "node:process";
-import { getTmCookie, getTmLocale, upsertDotEnvValue } from "../config/env.js";
+import { getTmAccountLocale, getTmCookie, getTmLocale, upsertDotEnvValue } from "../config/env.js";
 import { supportedLocales } from "../catalogs/index.js";
 import type { SupportedLocale } from "../catalogs/types.js";
 import type { RecipeSource } from "../sources/index.js";
@@ -70,10 +70,22 @@ export function sourceLocaleFromOptions(options: Record<string, unknown>, detect
   if (typeof options.sourceLocale === "string") return normalizeSupportedLocale(options.sourceLocale) ?? options.sourceLocale;
   if ("locale" in detectedSource && detectedSource.locale) return detectedSource.locale;
   const sourceDevice = sourceDeviceForType(detectedSource.type);
-  if (sourceDevice === "tm") return normalizeSupportedLocale(getTmLocale("de-DE")) ?? getTmLocale("de-DE");
+  if (sourceDevice === "tm") return normalizeSupportedLocale(getTmAccountLocale("de-DE")) ?? getTmAccountLocale("de-DE");
   if (sourceDevice === "mc") return normalizeSupportedLocale(process.env.MC_LOCALE) ?? process.env.MC_LOCALE ?? "de-DE";
   const requestedLocale = typeof options.locale === "string" ? options.locale : typeof options.language === "string" ? options.language : undefined;
   return normalizeSupportedLocale(requestedLocale) ?? requestedLocale ?? "de-DE";
+}
+
+export function tmAccountLocaleFromOptions(options: Record<string, unknown>): SupportedLocale {
+  const raw = typeof options.cookidooLocale === "string"
+    ? options.cookidooLocale
+    : getTmAccountLocale("de-DE");
+  const locale = normalizeSupportedLocale(raw);
+  if (!locale) {
+    throw new Error(`Unsupported Cookidoo account locale ${raw}. Supported locales: ${supportedLocales.join(", ")}`);
+  }
+  process.env.TM_ACCOUNT_LOCALE = locale;
+  return locale;
 }
 
 export function sourceDeviceForType(sourceType: RecipeSource["type"]): "mc" | "tm" | null {
