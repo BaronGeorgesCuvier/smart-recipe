@@ -59,7 +59,7 @@ describe("LLM prompt guidance", () => {
     expect(prompt).toContain("set settings.locale to en-US");
     expect(prompt).toContain("English");
     expect(prompt).toContain("temperatures in °C only");
-    expect(prompt).toContain("volume measures in ml");
+    expect(prompt).toContain("volume measures in mL");
     expect(prompt).toContain("Never output °F or fluid ounces");
     expect(prompt).toContain("Category IDs and English site IDs");
     expect(prompt).toContain("select 'Yes' when asked to preheat");
