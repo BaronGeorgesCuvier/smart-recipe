@@ -167,6 +167,41 @@ describe("ThermomixAdapter", () => {
       expect(annotations![1].name).toBe("blend"); // "blend speed 6 for 30s" comes second
     });
 
+    it("emits tappable TTS annotations for generic time-temperature-speed cooking", () => {
+      const inputCook: CookidooRecipeInput = {
+        ...sampleInput,
+        steps: [
+          {
+            text: "Cook 8 min/100C/reverse/speed 1.",
+            modeAnnotations: [
+              {
+                matchedSubstring: "8 min/100C/reverse/speed 1",
+                mode: {
+                  type: "cook",
+                  time: 480,
+                  temperature: 100,
+                  speed: "1",
+                  direction: "CCW"
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const payload = adapter.createPayload(inputCook);
+      const annotation = payload.instructions[0].annotations![0];
+
+      expect(annotation.type).toBe("TTS");
+      expect(annotation.name).toBeUndefined();
+      expect(annotation.data).toEqual({
+        time: 480,
+        temperature: { value: "100", unit: "C" },
+        speed: "1",
+        direction: "CCW"
+      });
+    });
+
     it("enforces steaming mode constraints: omits temperature completely", () => {
       const inputSteaming: CookidooRecipeInput = {
         ...sampleInput,
@@ -415,7 +450,10 @@ describe("ThermomixAdapter", () => {
     it("retries copying from public on rate limit status 429 and succeeds on next attempt", async () => {
       const mockRequest = vi.spyOn(CookidooClient.prototype, "request");
 
-      // First call to request fails with 429 (CookidooRateLimitError)
+      // Blank creation fails first, forcing the legacy public-copy fallback.
+      mockRequest.mockRejectedValueOnce(new Error("blank create unavailable"));
+
+      // First copy attempt is rate limited.
       mockRequest.mockRejectedValueOnce(
         new CookidooRateLimitError({
           status: 429,
@@ -426,7 +464,7 @@ describe("ThermomixAdapter", () => {
         })
       );
 
-      // Second, third, and fourth calls succeed (POST copy, PATCH meta, PATCH instructions)
+      // Retry succeeds, followed by metadata and instruction patches.
       mockRequest.mockResolvedValueOnce({ recipeId: "draft-recipe-id-123" });
       mockRequest.mockResolvedValueOnce({ success: true });
       mockRequest.mockResolvedValueOnce({ success: true });
@@ -469,7 +507,7 @@ describe("ThermomixAdapter", () => {
 
       expect(result.recipeUrl).toBe("https://cookidoo.de/created-recipes/de-DE/draft-recipe-id-123");
       expect(result.draft.id).toBe("draft-recipe-id-123");
-      expect(mockRequest).toHaveBeenCalledTimes(4);
+      expect(mockRequest).toHaveBeenCalledTimes(5);
     });
 
     it("gives up retrying after maximum attempts exceed", async () => {
@@ -519,6 +557,48 @@ describe("ThermomixAdapter", () => {
       }
 
       await expect(uploadPromise).rejects.toThrow(CookidooRateLimitError);
+    });
+
+    it("creates a blank custom recipe before patching metadata and instructions", async () => {
+      const mockRequest = vi.spyOn(CookidooClient.prototype, "request");
+      mockRequest.mockResolvedValueOnce({ recipeId: "blank-draft-id-123" });
+      mockRequest.mockResolvedValueOnce({ success: true });
+      mockRequest.mockResolvedValueOnce({ success: true });
+
+      const logger = {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
+      };
+
+      const result = await adapter.upload({
+        payload: adapter.createPayload(sampleInput),
+        recipeInput: sampleInput,
+        page: {
+          url: "https://example.com/recipe",
+          finalUrl: "https://example.com/recipe",
+          title: "Test Recipe",
+          markdown: "",
+          html: "",
+          images: []
+        },
+        locale: "de-DE",
+        cookie: "_oauth2_proxy=foo; v-authenticated=bar; v-is-authenticated=true",
+        logger
+      });
+
+      expect(mockRequest).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        method: "POST",
+        path: "/created-recipes/de-DE",
+        accept: "application/json",
+        body: { recipeName: "Test Recipe" }
+      }));
+      expect(mockRequest).toHaveBeenCalledTimes(3);
+      expect(result.draft.id).toBe("blank-draft-id-123");
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining("falling back to public copy")
+      );
     });
 
     it("accepts nested Cookidoo copy responses when extracting the new draft ID", async () => {
