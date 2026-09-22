@@ -448,8 +448,18 @@ describe("ThermomixAdapter", () => {
     it("tells the model to use generic TTS and not invent source details", () => {
       const prompt = adapter.getPromptInstructions("pl-PL", { tmVersion: "tm7" });
       expect(prompt).toContain("TTS: Generic tappable Time/Temperature/Speed control");
-      expect(prompt).toContain("Do NOT invent ingredient preparation details");
-      expect(prompt).toContain("Never invent them");
+      expect(prompt).toContain("INGREDIENT IDENTITY FIDELITY");
+      expect(prompt).toContain("do not invent 'short-grain', 'Baldo', or 'Osmancık'");
+      expect(prompt).toContain("do not invent 'cornstarch' or 'wheat starch'");
+    });
+
+    it("requires one uniform scaling factor and ignores recipe-page comments", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("choose ONE uniform scale factor");
+      expect(prompt).toContain("Never scale different quantified ingredients by different factors");
+      expect(prompt).toContain("Scale in the SOURCE UNIT first");
+      expect(prompt).toContain("Ignore reviews, user comments, ratings, testimonials");
+      expect(prompt).toContain("SCALING VERIFICATION");
     });
 
     it("generates instructions targeting TM7 when specified", () => {
