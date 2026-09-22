@@ -488,6 +488,13 @@ describe("ThermomixAdapter", () => {
       expect(prompt).toContain("preserve the scaled source measure");
     });
 
+    it("uses Celsius and millilitres for English TM recipes", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("temperatures in °C only");
+      expect(prompt).toContain("volume measures in ml");
+      expect(prompt).toContain("Never output °F or fluid ounces");
+    });
+
     it("generates instructions targeting TM7 when specified", () => {
       const prompt = adapter.getPromptInstructions("de-DE", { version: "TM7" });
       expect(prompt).toContain("Target: Thermomix (TM7)");
