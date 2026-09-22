@@ -117,10 +117,6 @@ export function resolveExcludedModes(targetDevice: "mc" | "tm", options: Record<
     excludeModes.push("foodProcessor");
   }
 
-  if (targetDevice === "tm" && !(options.extendTmModes || options.experimentalTmModes) && !excludeModes.includes("cook")) {
-    excludeModes.push("cook");
-  }
-
   return excludeModes;
 }
 
