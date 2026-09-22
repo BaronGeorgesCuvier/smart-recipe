@@ -125,7 +125,7 @@ async function tryPasswordLogin(
   }
   if (!email || !password) return null;
 
-  const locale = envLocale("TM_LOCALE");
+  const locale = envLocale("TM_ACCOUNT_LOCALE");
   try {
     const passwordLogin = adapter.passwordLogin;
     if (!passwordLogin) return null;
@@ -157,7 +157,7 @@ async function tryPasswordLogin(
 async function trySilentSessionRefresh(adapter: CliAuthAdapter, configPath: string): Promise<AuthProvider | null> {
   if (adapter.id !== "tm") return null;
 
-  const locale = envLocale("TM_LOCALE");
+  const locale = envLocale("TM_ACCOUNT_LOCALE");
   try {
     const spinnerEnabled = Boolean(process.stderr.isTTY);
     const result = await withCliSpinner<CapturedSession>(
@@ -191,7 +191,7 @@ export async function attemptBrowserLogin(
   configPath: string
 ): Promise<AuthProvider> {
   const isTm = adapter.id === "tm";
-  const localeKey = isTm ? "TM_LOCALE" : "MC_LOCALE";
+  const localeKey = isTm ? "TM_ACCOUNT_LOCALE" : "MC_LOCALE";
   const cookieKey = isTm ? "TM_COOKIE" : "MC_COOKIE";
   const loginKey = isTm ? "TM_LOGIN" : "MC_LOGIN";
   const pwKey = isTm ? "TM_PW" : "MC_PW";
