@@ -53,6 +53,66 @@ describe("ThermomixAdapter", () => {
       expect(result.formattedErrors).toContain("title");
     });
 
+    it("strips invented TTS temperature and default clockwise direction when source text has no temperature", () => {
+      const input: CookidooRecipeInput = {
+        ...sampleInput,
+        steps: [
+          {
+            text: "Chop onion 5 s/speed 5.",
+            modeAnnotations: [
+              {
+                matchedSubstring: "5 s/speed 5",
+                mode: {
+                  type: "tts",
+                  time: 5,
+                  speed: "5",
+                  temperature: 37,
+                  direction: "CW"
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const normalized = adapter.normalizeInput(input);
+      const mode = normalized.steps[0].modeAnnotations![0].mode;
+
+      expect(mode.type).toBe("tts");
+      if (mode.type !== "tts") throw new Error("expected tts");
+      expect(mode.temperature).toBeUndefined();
+      expect(mode.direction).toBeUndefined();
+    });
+
+    it("preserves an explicitly written TTS temperature", () => {
+      const input: CookidooRecipeInput = {
+        ...sampleInput,
+        steps: [
+          {
+            text: "Cook 3 min/120°C/speed 1.",
+            modeAnnotations: [
+              {
+                matchedSubstring: "3 min/120°C/speed 1",
+                mode: {
+                  type: "tts",
+                  time: 180,
+                  speed: "1",
+                  temperature: 120
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const normalized = adapter.normalizeInput(input);
+      const mode = normalized.steps[0].modeAnnotations![0].mode;
+
+      expect(mode.type).toBe("tts");
+      if (mode.type !== "tts") throw new Error("expected tts");
+      expect(mode.temperature).toBe(120);
+    });
+
     it("normalizes and trims string fields", () => {
       const unnormalized: CookidooRecipeInput = {
         ...sampleInput,
