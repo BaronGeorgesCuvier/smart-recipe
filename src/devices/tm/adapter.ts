@@ -39,6 +39,30 @@ const ansi = {
 };
 
 type CookidooModeInput = NonNullable<CookidooRecipeInput["steps"][number]["modeAnnotations"]>[number]["mode"];
+
+function hasExplicitTemperature(text: string): boolean {
+  return /\b\d{2,3}\s*°?\s*C\b/i.test(text) || /\bvaroma\b/i.test(text);
+}
+
+function normalizeModeForMatchedText(mode: CookidooModeInput, matchedSubstring: string): CookidooModeInput {
+  if (mode.type !== "tts") return mode;
+
+  const normalized = { ...mode };
+
+  // Gemini occasionally fills the optional temperature with the schema minimum
+  // (37 C) even when the source operation only specifies time + speed.
+  // Never send a temperature unless it is explicitly present in the matched source text.
+  if (!hasExplicitTemperature(matchedSubstring)) {
+    delete normalized.temperature;
+  }
+
+  // Clockwise is Cookidoo's default and does not need to be synthesized.
+  if (normalized.direction === "CW") {
+    delete normalized.direction;
+  }
+
+  return normalized as CookidooModeInput;
+}
 type CookidooValidator = { (data: unknown): boolean; errors?: ErrorObject[] | null };
 
 const Ajv2020 = Ajv2020Module as unknown as new (options: Record<string, unknown>) => {
@@ -81,10 +105,14 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
           matchedSubstring: (ann.matchedSubstring ?? "").trim(),
           ingredientId: (ann.ingredientId ?? "").trim(),
         })),
-        modeAnnotations: (step.modeAnnotations ?? []).map((ann) => ({
-          ...ann,
-          matchedSubstring: (ann.matchedSubstring ?? "").trim(),
-        })),
+        modeAnnotations: (step.modeAnnotations ?? []).map((ann) => {
+          const matchedSubstring = (ann.matchedSubstring ?? "").trim();
+          return {
+            ...ann,
+            matchedSubstring,
+            mode: normalizeModeForMatchedText(ann.mode, matchedSubstring),
+          };
+        }),
       })),
     } as CookidooRecipeInput;
   }
