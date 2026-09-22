@@ -1,3 +1,4 @@
+import process from "node:process";
 import type { CookidooRecipeInput } from "../devices/tm/schema.js";
 import { getArray, getNumber, getRecord, getString, isRecord } from "../utils/unknown.js";
 
