@@ -479,6 +479,13 @@ describe("ThermomixAdapter", () => {
       expect(prompt).toContain("Never silently claim that 90°C or 95°C equals boiling");
     });
 
+    it("forbids guessed dry-ingredient volume-to-mass conversions", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("UNIT-CONVERSION FIDELITY");
+      expect(prompt).toContain("do not append guessed gram values");
+      expect(prompt).toContain("preserve the scaled source measure");
+    });
+
     it("generates instructions targeting TM7 when specified", () => {
       const prompt = adapter.getPromptInstructions("de-DE", { version: "TM7" });
       expect(prompt).toContain("Target: Thermomix (TM7)");
