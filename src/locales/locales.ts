@@ -301,7 +301,7 @@ export const localeTexts: Record<SupportedLocale, LocaleText> = {
   "en-US": {
     locale: "en-US",
     outputLanguage: "English",
-    unitConvention: "English text with metric cooking units: temperatures in °C only; liquids in ml or L; masses in g or kg. Convert °F to °C and convert liquid cups/fl oz to ml/L when the conversion is deterministic. Never output °F or fluid ounces. For solid ingredients, do not invent gram weights from volume measures unless a deterministic source-supported conversion is available.",
+    unitConvention: "English text with metric cooking units: temperatures in °C only; volume measures in ml (prefer ml rather than cups, fl oz, tbsp, or tsp whenever a deterministic conversion is available); masses in g or kg. Convert °F to °C. Never output °F or fluid ounces. Do not invent gram weights from volume measures for solid ingredients; if a volume-to-ml conversion is deterministic, convert the volume itself to ml instead.",
     servingUnitExamples: "servings, jars, pieces",
     categoryLabel: "English site IDs",
     defaultIngredientGroupName: "Ingredients",
