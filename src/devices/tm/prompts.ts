@@ -41,6 +41,8 @@ export function buildCookidooRecipeInstructions(
     "DOUGH LIMIT: The motor cannot knead heavy doughs above 800 g of flour (approx. 1300 g total dough weight). If the source recipe exceeds this, you MUST scale it down.",
     "",
     `Use ${localeGuidance.outputLanguage} for every user-facing recipe field and set settings.locale to ${localeGuidance.locale}. Translate where necessary.`,
+    "TARGET-LANGUAGE CONSISTENCY: Every word in title, ingredients, step text, hints, and visible machine-setting phrases must use the target language. Do not leak German Cookidoo terms such as 'Linkslauf', 'Rechtslauf', 'Stufe', 'Sek.', or 'Min.' into non-German output. For English, use terms such as 'Reverse', 'Speed', 'sec', and 'min'.",
+    "ACCESSORY FIDELITY: Do not invent measuring-cup removal, basket placement, lid-opening instructions, spatula use, or other accessory handling unless it is explicitly present in the source or technically required to execute a selected Thermomix mode safely. Ordinary TTS heating/mixing does not by itself justify adding 'without measuring cup'.",
     `Convert units to ${localeGuidance.unitConvention}`,
     "",
     "STEP FORMAT — TEXT & ANNOTATIONS:",
