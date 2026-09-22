@@ -46,6 +46,7 @@ export function buildCookidooRecipeInstructions(
     "TARGET-LANGUAGE CONSISTENCY: Every word in title, ingredients, step text, hints, and visible machine-setting phrases must use the target language. Do not leak German Cookidoo terms such as 'Linkslauf', 'Rechtslauf', 'Stufe', 'Sek.', or 'Min.' into non-German output. For English, use terms such as 'Reverse', 'Speed', 'sec', and 'min'.",
     "ACCESSORY FIDELITY: Do not invent measuring-cup removal, basket placement, lid-opening instructions, spatula use, or other accessory handling unless it is explicitly present in the source or technically required to execute a selected Thermomix mode safely. Ordinary TTS heating/mixing does not by itself justify adding 'without measuring cup'.",
     `Convert units to ${localeGuidance.unitConvention}`,
+    "UNIT-CONVERSION FIDELITY: Never invent an ingredient-specific mass/volume equivalence that is not stated by the source or supplied by a deterministic conversion rule. In particular, do not append guessed gram values to cups, tea glasses, tablespoons, or similar volume measures for dry ingredients. If a reliable conversion is unavailable, preserve the scaled source measure in translated form rather than hallucinating an approximate weight.",
     "",
     "STEP FORMAT — TEXT & ANNOTATIONS:",
     "Each step is a structured object containing:",
