@@ -311,7 +311,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
   }
 
   async getCurrentUser(cookie: string) {
-    const client = new CookidooClient({ cookie, locale: "de-DE" });
+    const client = new CookidooClient({ cookie, locale: process.env.TM_ACCOUNT_LOCALE ?? process.env.TM_LOCALE ?? "de-DE" });
     return client.request<unknown>({
       method: "GET",
       path: "/community/profile",
@@ -321,7 +321,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
   }
 
   async listDrafts(options: { cookie: string; page?: number; size?: number }) {
-    const locale = (process.env.TM_LOCALE ?? "de-DE") as string;
+    const locale = (process.env.TM_ACCOUNT_LOCALE ?? process.env.TM_LOCALE ?? "de-DE") as string;
     const client = new CookidooClient({ cookie: options.cookie, locale });
     const res = await client.request<unknown>({
       method: "GET",
@@ -365,7 +365,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
   }
 
   async getRecipe(options: { cookie: string; id: string; public?: boolean }) {
-    const locale = (process.env.TM_LOCALE ?? "de-DE") as string;
+    const locale = (process.env.TM_ACCOUNT_LOCALE ?? process.env.TM_LOCALE ?? "de-DE") as string;
     const client = new CookidooClient({ cookie: options.cookie, locale });
     
     const isOfficial = /^r\d+$/.test(options.id);
