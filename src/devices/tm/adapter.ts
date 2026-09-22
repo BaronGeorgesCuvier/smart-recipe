@@ -432,45 +432,67 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
       }
     }
 
-    const delays = [30_000, 60_000, 90_000, 120_000];
-    let attempt = 0;
     let draft: unknown;
 
-    const publicUrl = `https://${client.domain}/created-recipes/public/recipes/${client.language}/01KB04WSJP4SHNBKJK4H4FT0PZ`;
+    // Prefer Cookidoo's blank custom-recipe creation endpoint. This avoids the
+    // import/copy rate limit entirely and does not depend on a public dummy recipe.
+    try {
+      logger.info({ title: options.recipeInput.title }, "creating blank Cookidoo recipe");
+      draft = await client.request<unknown>({
+        method: "POST",
+        path: `/created-recipes/${client.language}`,
+        responseSchema: CookidooCopyRecipeResponseSchema,
+        accept: "application/json",
+        body: {
+          recipeName: options.recipeInput.title,
+        },
+      });
+    } catch (createError: unknown) {
+      // Older Cookidoo deployments may not support blank creation. Preserve
+      // the previous copy-from-public flow as a compatibility fallback.
+      logger.warn(
+        { error: createError },
+        "blank Cookidoo recipe creation failed; falling back to public copy"
+      );
 
-    for (;;) {
-      try {
-        logger.info({ publicUrl, attempt }, "copying public dummy recipe to Cookidoo");
-        draft = await client.request<unknown>({
-          method: "POST",
-          path: `/created-recipes/${client.language}`,
-          responseSchema: CookidooCopyRecipeResponseSchema,
-          body: {
-            recipeUrl: publicUrl,
-            servingSize: 1,
-          },
-        });
-        break;
-      } catch (err: unknown) {
-        const errorRecord = isRecord(err) ? err : undefined;
-        const body = getRecord(errorRecord, "body");
-        const isRateLimit =
-          err instanceof CookidooRateLimitError ||
-          getString(errorRecord, "name") === "CookidooRateLimitError" ||
-          getNumber(errorRecord, "status") === 429 ||
-          getString(body, "code") === "importFailed";
+      const delays = [30_000, 60_000, 90_000, 120_000];
+      let attempt = 0;
+      const publicUrl = `https://${client.domain}/created-recipes/public/recipes/${client.language}/01KB04WSJP4SHNBKJK4H4FT0PZ`;
 
-        if (!isRateLimit || attempt >= delays.length) {
-          throw err;
+      for (;;) {
+        try {
+          logger.info({ publicUrl, attempt }, "copying public dummy recipe to Cookidoo");
+          draft = await client.request<unknown>({
+            method: "POST",
+            path: `/created-recipes/${client.language}`,
+            responseSchema: CookidooCopyRecipeResponseSchema,
+            body: {
+              recipeUrl: publicUrl,
+              servingSize: 1,
+            },
+          });
+          break;
+        } catch (err: unknown) {
+          const errorRecord = isRecord(err) ? err : undefined;
+          const body = getRecord(errorRecord, "body");
+          const isRateLimit =
+            err instanceof CookidooRateLimitError ||
+            getString(errorRecord, "name") === "CookidooRateLimitError" ||
+            getNumber(errorRecord, "status") === 429 ||
+            getString(body, "code") === "importFailed";
+
+          if (!isRateLimit || attempt >= delays.length) {
+            throw err;
+          }
+
+          const delayMs = Math.max(getNumber(errorRecord, "retryAfterMs") ?? 0, delays[attempt]);
+          logger.warn(
+            { attempt: attempt + 1, delayMs },
+            `rate limited by Cookidoo copy API. Retrying after delay...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          attempt += 1;
         }
-
-        const delayMs = Math.max(getNumber(errorRecord, "retryAfterMs") ?? 0, delays[attempt]);
-        logger.warn(
-          { attempt: attempt + 1, delayMs },
-          `rate limited by Cookidoo copy API. Retrying after delay...`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        attempt += 1;
       }
     }
 
