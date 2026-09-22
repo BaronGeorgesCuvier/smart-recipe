@@ -211,7 +211,7 @@ function validateExcludedModes(output: unknown, excludeModes: string[] = []): st
   return errors;
 }
 
-function validateTmAdaptationOutput(
+export function validateTmAdaptationOutput(
   output: unknown,
   sourceMarkdown: string,
   locale: string
