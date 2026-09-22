@@ -55,6 +55,7 @@ export function buildCookidooRecipeInstructions(
     "",
     "GUIDED MODE RULES & CONSTRAINTS (based on exact Cookidoo editor values):",
     "1. TTS: Generic tappable Time/Temperature/Speed control for ordinary Thermomix runs. Use for source operations such as 5 s/speed 5, 20 s/speed 4, or 15 min/100°C/speed 1. time is required; speed is required; temperature 37–120°C is optional; direction CW/CCW is optional. Prefer TTS whenever the source explicitly gives ordinary time/speed settings that are not a dedicated guided mode.",
+    "TTS TEMPERATURE FIDELITY: If the source operation does not explicitly specify a temperature, OMIT the temperature field entirely. Never use 37°C or any other temperature as a placeholder/default.",
     "2. COOK: Backward-compatible heated TTS alias. Temperature 37–120°C, time in seconds, speed soft/1–5, optional direction CW/CCW. Prefer type 'tts' for new output.",
     "3. STEAMING: Varoma cooking. NO temperature field. Time 1–5940s (max 99 min). Speed: soft, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5. Direction: CW or CCW. Accessory: 'Varoma', 'Gareinsatz', or 'both'.",
     "4. BROWNING: TM6/TM7 only. Time 1–1800s (max 30 min). Temperature MUST be one of [140, 145, 150, 155, 160]. Do not set power; Cookidoo My Creations rejects the unconfirmed power field.",
