@@ -301,7 +301,7 @@ export const localeTexts: Record<SupportedLocale, LocaleText> = {
   "en-US": {
     locale: "en-US",
     outputLanguage: "English",
-    unitConvention: "English recipe conventions: g, kg, ml, tsp, tbsp, pinch, pieces; use ml only when grams would be misleading.",
+    unitConvention: "English text with metric cooking units: temperatures in °C only; liquids in ml or L; masses in g or kg. Convert °F to °C and convert liquid cups/fl oz to ml/L when the conversion is deterministic. Never output °F or fluid ounces. For solid ingredients, do not invent gram weights from volume measures unless a deterministic source-supported conversion is available.",
     servingUnitExamples: "servings, jars, pieces",
     categoryLabel: "English site IDs",
     defaultIngredientGroupName: "Ingredients",
