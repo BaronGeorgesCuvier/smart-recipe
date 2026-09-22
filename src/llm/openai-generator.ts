@@ -59,15 +59,21 @@ export class OpenAIRecipeGenerator implements RecipeGenerator {
       const scaleErrors = useCookidooFidelityFixes
         ? validateCookidooScaleSteps(output, page.markdown)
         : [];
+      const tmAdaptationErrors =
+        adapter.id === "tm"
+          ? validateTmAdaptationOutput(output, page.markdown, finalOptions.locale)
+          : [];
       const allErrors = [
         ...validation.errors,
         ...excludedErrors,
-        ...scaleErrors
+        ...scaleErrors,
+        ...tmAdaptationErrors
       ];
       if (
         validation.ok &&
         excludedErrors.length === 0 &&
-        scaleErrors.length === 0
+        scaleErrors.length === 0 &&
+        tmAdaptationErrors.length === 0
       ) {
         const normalized =
           adapter.normalizeInput(output) as RecipeInput;
@@ -201,6 +207,52 @@ function validateExcludedModes(output: unknown, excludeModes: string[] = []): st
       }
     });
   });
+
+  return errors;
+}
+
+function validateTmAdaptationOutput(
+  output: unknown,
+  sourceMarkdown: string,
+  locale: string
+): string[] {
+  const errors: string[] = [];
+  const ingredients = getArray(output, "ingredients");
+  const steps = getArray(output, "steps");
+
+  const ingredientTexts = ingredients
+    .map((ingredient) => getString(ingredient, "text") ?? "")
+    .filter(Boolean);
+  const stepTexts = steps
+    .map((step) => getString(step, "text") ?? "")
+    .filter(Boolean);
+  const visibleText = [...ingredientTexts, ...stepTexts].join("\n");
+
+  if (locale.toLowerCase() === "en-us") {
+    const forbiddenImperial = /\b(?:cups?|tbsp|tablespoons?|tsp|teaspoons?|fl\.?\s*oz|fluid\s+ounces?)\b|°\s*F\b|degrees?\s+Fahrenheit\b/i;
+    if (forbiddenImperial.test(visibleText)) {
+      errors.push(
+        "English Thermomix output must use metric units: °C for temperature and mL for deterministic volume measures. Do not leave cup, tbsp, tsp, fl oz, or °F in ingredients or steps. For Turkish recipe measures use these project conventions when the source uses them: su bardağı = 200 mL, çay bardağı = 100 mL, yemek kaşığı = 15 mL, tatlı kaşığı = 10 mL, çay kaşığı = 5 mL. Apply the recipe scale factor before conversion."
+      );
+    }
+
+    if (/\btea\s+glasses?\b/i.test(visibleText) && /çay\s+bardağ/i.test(sourceMarkdown)) {
+      errors.push(
+        "Convert Turkish çay bardağı to mL in English output using the project convention 1 çay bardağı = 100 mL; do not emit 'tea glass'."
+      );
+    }
+  }
+
+  const inventedMeasuringCup =
+    /\bwithout\s+(?:the\s+)?measuring\s+cup\b|\bremove\s+(?:the\s+)?measuring\s+cup\b|\bmeasuring\s+cup\s+removed\b/i;
+  const sourceMentionsMeasuringCup =
+    /\bmeasuring\s+cup\b|\bmessbecher\b|\bgobelet\s+doseur\b|\bodměrk\w*\b|\bmiark\w*\b|ölçü\s+kab\w*/i.test(sourceMarkdown);
+
+  if (stepTexts.some((text) => inventedMeasuringCup.test(text)) && !sourceMentionsMeasuringCup) {
+    errors.push(
+      "Do not invent measuring-cup removal. The source recipe does not instruct removing the measuring cup, so remove phrases such as 'without the measuring cup' from the generated Thermomix steps."
+    );
+  }
 
   return errors;
 }
