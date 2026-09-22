@@ -456,6 +456,9 @@ describe("ThermomixAdapter", () => {
     it("requires one uniform scaling factor and ignores recipe-page comments", () => {
       const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
       expect(prompt).toContain("choose ONE uniform scale factor");
+      expect(prompt).toContain("MINIMAL CAPACITY SCALING");
+      expect(prompt).toContain("Choose the largest practical uniform factor");
+      expect(prompt).toContain("0.50 would be unnecessarily small");
       expect(prompt).toContain("Never scale different quantified ingredients by different factors");
       expect(prompt).toContain("Scale in the SOURCE UNIT first");
       expect(prompt).toContain("Ignore reviews, user comments, ratings, testimonials");
