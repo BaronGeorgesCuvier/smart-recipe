@@ -471,12 +471,14 @@ describe("ThermomixAdapter", () => {
       expect(prompt).toContain("Ordinary TTS heating/mixing does not by itself justify adding 'without measuring cup'");
     });
 
-    it("requires boiling semantics to match temperature and leaves headroom for hot foaming liquids", () => {
+    it("adapts hot foaming liquids without unnecessary extra scaling", () => {
       const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
-      expect(prompt).toContain("HOT FOAMING LIQUID HEADROOM");
-      expect(prompt).toContain("at most about 2.0 L");
+      expect(prompt).toContain("HOT FOAMING LIQUID ADAPTATION");
+      expect(prompt).toContain("Scale only when a real bowl-capacity or device-limit constraint requires it");
+      expect(prompt).toContain("prefer a Thermomix-safe adaptation such as lower temperature, longer cooking time");
       expect(prompt).toContain("BOILING SEMANTICS");
-      expect(prompt).toContain("Never silently claim that 90°C or 95°C equals boiling");
+      expect(prompt).toContain("do not claim that 90°C or 95°C itself is boiling");
+      expect(prompt).toContain("Preserve the intended culinary outcome rather than mechanically reproducing the stovetop action");
     });
 
     it("forbids guessed dry-ingredient volume-to-mass conversions", () => {
