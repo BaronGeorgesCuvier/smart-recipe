@@ -830,38 +830,68 @@ describe("ThermomixAdapter", () => {
   });
 
   describe("Cookidoo browserless OAuth login", () => {
-    it("follows the redirect flow, posts credentials, and returns Cookidoo session cookies", async () => {
+    it("uses authorization-code + PKCE and returns a bearer credential", async () => {
       const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
         const href = String(url);
         const method = init?.method ?? "GET";
 
-        if (href === "https://cookidoo.de/profile/de-DE/login?redirectAfterLogin=%2Ffoundation%2Fde-DE%2Ffor-you") {
-          return redirectResponse("https://cookidoo.de/oauth2/start?market=de&ui_locales=de-DE&rd=%2Ffoundation%2Fde-DE%2Ffor-you");
+        if (href === "https://ciam.prod.cookidoo.vorwerk-digital.com/.well-known/openid-configuration") {
+          return new Response(JSON.stringify({
+            authorization_endpoint: "https://ciam.prod.cookidoo.vorwerk-digital.com/authz-srv/authz",
+            token_endpoint: "https://ciam.prod.cookidoo.vorwerk-digital.com/token-srv/token",
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
         }
-        if (href.startsWith("https://cookidoo.de/oauth2/start")) {
-          return redirectResponse("https://ciam.prod.cookidoo.vorwerk-digital.com/authz-srv/authz?client_id=tmde2-live-v1&state=state-123");
-        }
+
         if (href.startsWith("https://ciam.prod.cookidoo.vorwerk-digital.com/authz-srv/authz")) {
-          return redirectResponse("https://eu.login.vorwerk.com/ciam/login?requestId=request-from-url&view_type=login");
+          const authUrl = new URL(href);
+          expect(authUrl.searchParams.get("client_id")).toBe("mobile-android");
+          expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+          expect(authUrl.searchParams.get("code_challenge")).toBeTruthy();
+          expect(authUrl.searchParams.get("market")).toBe("de");
+          const state = authUrl.searchParams.get("state");
+          return redirectResponse(
+            `https://ciam.prod.cookidoo.vorwerk-digital.com/login?state=${state}`
+          );
         }
-        if (href.startsWith("https://eu.login.vorwerk.com/ciam/login")) {
+
+        if (href.startsWith("https://ciam.prod.cookidoo.vorwerk-digital.com/login?state=")) {
           return new Response('<form><input type="hidden" name="requestId" value="request-123"></form>', {
             status: 200,
             headers: { "content-type": "text/html" },
           });
         }
+
         if (href === "https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login" && method === "POST") {
-          return redirectResponse("https://cookidoo.de/oauth2/callback?code=auth-code&state=state-123", {
-            "set-cookie": "cidaas_sid=sid; Domain=ciam.prod.cookidoo.vorwerk-digital.com; Path=/",
-          });
+          const body = String(init?.body ?? "");
+          expect(body).toContain("requestId=request-123");
+          expect(body).toContain("username=cook%40example.test");
+          expect(body).toContain("password=secret");
+
+          const authorizeCall = (fetchImpl as unknown as { mock: { calls: Array<[string | URL | Request, RequestInit | undefined]> } }).mock.calls
+            .find(([requestUrl]) => String(requestUrl).startsWith("https://ciam.prod.cookidoo.vorwerk-digital.com/authz-srv/authz"));
+          const state = new URL(String(authorizeCall?.[0])).searchParams.get("state");
+          return redirectResponse(
+            `com.vorwerk.cookidoo://code-grant?code=auth-code&state=${state}`
+          );
         }
-        if (href.startsWith("https://cookidoo.de/oauth2/callback")) {
-          return redirectResponse("/foundation/de-DE/for-you", {
-            "set-cookie": "_oauth2_proxy=session; Domain=cookidoo.de; Path=/, v-authenticated=sig; Domain=cookidoo.de; Path=/, v-is-authenticated=true; Domain=cookidoo.de; Path=/",
+
+        if (href === "https://ciam.prod.cookidoo.vorwerk-digital.com/token-srv/token" && method === "POST") {
+          const body = new URLSearchParams(String(init?.body ?? ""));
+          expect(body.get("grant_type")).toBe("authorization_code");
+          expect(body.get("code")).toBe("auth-code");
+          expect(body.get("client_id")).toBe("mobile-android");
+          expect(body.get("code_verifier")).toBeTruthy();
+          return new Response(JSON.stringify({
+            access_token: "access-token-123",
+            refresh_token: "refresh-token-123",
+            expires_in: 43200,
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
           });
-        }
-        if (href === "https://cookidoo.de/foundation/de-DE/for-you") {
-          return new Response("ok", { status: 200 });
         }
 
         throw new Error(`Unexpected request: ${method} ${href}`);
@@ -877,18 +907,35 @@ describe("ThermomixAdapter", () => {
       });
 
       expect(result).toEqual({
-        cookie: "_oauth2_proxy=session; v-authenticated=sig; v-is-authenticated=true",
+        cookie: "Bearer access-token-123",
         source: "cookidoo-password",
-        cookieNames: ["_oauth2_proxy", "cidaas_sid", "v-authenticated", "v-is-authenticated"],
+        cookieNames: ["access_token"],
+      });
+    });
+
+    it("sends bearer credentials through Authorization instead of Cookie", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      ) as unknown as typeof fetch;
+
+      const client = new CookidooClient({
+        cookie: "Bearer access-token-123",
+        locale: "de-DE",
+        fetch: fetchImpl,
       });
 
-      const postCall = (fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls.find(([url, init]) =>
-        String(url) === "https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login" && init?.method === "POST"
-      );
-      expect(postCall).toBeDefined();
-      const [, postInit] = postCall!;
-      expect(String(postInit.body)).toBe("requestId=request-123&username=cook%40example.test&password=secret");
-      expect(new Headers(postInit.headers).get("Referer")).toBe("https://eu.login.vorwerk.com/ciam/login?requestId=request-from-url&view_type=login");
+      await client.request({
+        path: "/community/profile",
+        accept: "application/json",
+      });
+
+      const [, init] = (fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls[0];
+      const headers = new Headers(init.headers);
+      expect(headers.get("Authorization")).toBe("Bearer access-token-123");
+      expect(headers.get("Cookie")).toBeNull();
     });
   });
 });
