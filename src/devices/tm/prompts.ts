@@ -28,7 +28,8 @@ export function buildCookidooRecipeInstructions(
       ? `IMPORTANT: The following modes are excluded by user preference: ${excludeModes.join(", ")}. Do NOT use them.`
       : "",
     "",
-    "You may adjust the order of steps or simplify steps so they can be performed with the machine if this does not materially change the final dish. Transform the recipe into a Thermomix-native recipe with as few manual steps as practical.",
+    "Adapt only what is necessary to make the recipe executable on Thermomix. Preserve source ingredient quantities, preparation qualifiers, step intent, time, temperature, speed, direction, and order unless a device constraint requires a change.",
+    "Do NOT invent ingredient preparation details, optional garnishes, serving suggestions, substitutions, flavor additions, or hints that are absent from the source. If the source has no hints or serving suggestions, set hints to an empty string.",
     "",
     "STRICT CAPACITY LIMIT: The mixing bowl holds a maximum of 2.2 liters (approx. 2200 g). You MUST mentally calculate the cumulative weight and volume of all ingredients currently in the bowl at every step. If the total exceeds 2200 g/ml at any point, you MUST scale down the entire recipe proportionally from the very beginning to ensure safe cooking without overflowing.",
     "",
@@ -53,14 +54,15 @@ export function buildCookidooRecipeInstructions(
     "- For modeAnnotations, specify the exact phrase describing the guided mode (e.g. \"10 Sek./Stufe 7 zerkleinern\", \"Dank Linkslauf 15 Min./Stufe 1 garen\"). Only annotate the guided mode once per operation (do NOT duplicate mode annotations).",
     "",
     "GUIDED MODE RULES & CONSTRAINTS (based on exact Cookidoo editor values):",
-    "1. COOK: Standard simmering/cooking. Temperature 37–120°C (any integer), time in seconds, speed soft/1–5, optional direction CW/CCW. Excluded by default for My Creations — only use if --extend-tm-modes is set.",
-    "2. STEAMING: Varoma cooking. NO temperature field. Time 1–5940s (max 99 min). Speed: soft, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5. Direction: CW or CCW. Accessory: 'Varoma', 'Gareinsatz', or 'both'.",
-    "3. BROWNING: TM6/TM7 only. Time 1–1800s (max 30 min). Temperature MUST be one of [140, 145, 150, 155, 160]. Do not set power; Cookidoo My Creations rejects the unconfirmed power field.",
-    "4. DOUGH: Time 1–1200s (max 20 min). No speed or temperature.",
-    "5. BLEND (Pürieren): HIGH-SPEED ONLY. Speed MUST be one of [6, 6.5, 7, 7.5, 8]. Time 10–300s (min 10s, max 5 min). Do NOT use for speed 1–5 operations — leave those as plain text runs.",
-    "6. TURBO: Short maximum-speed pulses. Use 'pulseDuration' (must be exactly 0.5, 1, or 2) and optional 'pulseCount' (1–9).",
-    "7. WARM UP (Erwärmen): Temperature must be one of [37, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90] °C. Speed: soft, 1, or 2. No time field.",
-    "8. RICE COOKER: No parameters.",
+    "1. TTS: Generic tappable Time/Temperature/Speed control for ordinary Thermomix runs. Use for source operations such as 5 s/speed 5, 20 s/speed 4, or 15 min/100°C/speed 1. time is required; speed is required; temperature 37–120°C is optional; direction CW/CCW is optional. Prefer TTS whenever the source explicitly gives ordinary time/speed settings that are not a dedicated guided mode.",
+    "2. COOK: Backward-compatible heated TTS alias. Temperature 37–120°C, time in seconds, speed soft/1–5, optional direction CW/CCW. Prefer type 'tts' for new output.",
+    "3. STEAMING: Varoma cooking. NO temperature field. Time 1–5940s (max 99 min). Speed: soft, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5. Direction: CW or CCW. Accessory: 'Varoma', 'Gareinsatz', or 'both'.",
+    "4. BROWNING: TM6/TM7 only. Time 1–1800s (max 30 min). Temperature MUST be one of [140, 145, 150, 155, 160]. Do not set power; Cookidoo My Creations rejects the unconfirmed power field.",
+    "5. DOUGH: Time 1–1200s (max 20 min). No speed or temperature.",
+    "6. BLEND (Pürieren): HIGH-SPEED ONLY. Speed MUST be one of [6, 6.5, 7, 7.5, 8]. Time 10–300s (min 10s, max 5 min). Use TTS instead for ordinary short/manual speed operations that are not truly puree/blend mode.",
+    "7. TURBO: Short maximum-speed pulses. Use 'pulseDuration' (must be exactly 0.5, 1, or 2) and optional 'pulseCount' (1–9).",
+    "8. WARM UP (Erwärmen): Temperature must be one of [37, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90] °C. Speed: soft, 1, or 2. No time field.",
+    "9. RICE COOKER: No parameters.",
     "",
     "EXAMPLES (ingredients list for these examples: [\"25 g frischer Koriander\", \"2 Knoblauchzehen\", \"1 Zwiebel, halbiert\", \"15 g Ingwer, frisch\", \"20 g Pflanzenöl\", \"1 EL Currypulver\", \"½ TL Chiliflocken\", \"150 g rote Linsen\", \"400 g stückige Tomaten\", \"400 g Kokosmilch\", \"600 g Wasser\"]):",
     JSON.stringify([
@@ -74,11 +76,14 @@ export function buildCookidooRecipeInstructions(
         ]
       },
       {
-        text: "Zwiebel, Knoblauch und Ingwer in den Mixtopf geben und 5 Sek./Stufe 5 zerkleinern. Mit dem Spatel nach unten schieben.",
+        text: "Zwiebel, Knoblauch und Ingwer in den Mixtopf geben und 5 Sek./Stufe 5 zerkleinern.",
         ingredientAnnotations: [
           { matchedSubstring: "Zwiebel", ingredientId: "zwiebel" },
           { matchedSubstring: "Knoblauch", ingredientId: "knoblauch" },
           { matchedSubstring: "Ingwer", ingredientId: "ingwer" }
+        ],
+        modeAnnotations: [
+          { matchedSubstring: "5 Sek./Stufe 5 zerkleinern", mode: { type: "tts", time: 5, speed: "5" } }
         ]
       },
       {
@@ -103,10 +108,10 @@ export function buildCookidooRecipeInstructions(
     ], null, 2),
     "",
     "GENERAL STYLE & CONVENTIONS:",
-    "- Paraphrase description and steps to avoid reproducing copyrighted source text. Describe the recipe as if it were original.",
-    "- Make an educated guess on nutrients (calories, carbohydrate, fat, protein) if missing from source. Amount must be whole integers.",
-    "- Be specific, concise, and clear. Make the recipe foolproof.",
-    "- hints: Extract any useful tips, variations, or serving suggestions from the source recipe into the hints field. Omit tips that are irrelevant to Thermomix (e.g. stovetop-only alternatives). Use an empty string if there are no useful tips."
+    "- Paraphrase source wording as needed, but preserve factual recipe content and machine settings.",
+    "- Do not add culinary facts that are not supported by the source.",
+    "- Be specific, concise, and clear.",
+    "- hints: Extract only tips, variations, or serving suggestions explicitly present in the source recipe. Never invent them. Use an empty string if the source provides none."
   ];
 
   return instructions.filter(Boolean).join("\n");
