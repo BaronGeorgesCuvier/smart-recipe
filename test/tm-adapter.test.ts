@@ -462,6 +462,15 @@ describe("ThermomixAdapter", () => {
       expect(prompt).toContain("SCALING VERIFICATION");
     });
 
+    it("keeps visible mode text in the target language and avoids invented accessory handling", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("TARGET-LANGUAGE CONSISTENCY");
+      expect(prompt).toContain("Do not leak German Cookidoo terms");
+      expect(prompt).toContain("For English, use terms such as 'Reverse', 'Speed', 'sec', and 'min'");
+      expect(prompt).toContain("ACCESSORY FIDELITY");
+      expect(prompt).toContain("Ordinary TTS heating/mixing does not by itself justify adding 'without measuring cup'");
+    });
+
     it("generates instructions targeting TM7 when specified", () => {
       const prompt = adapter.getPromptInstructions("de-DE", { version: "TM7" });
       expect(prompt).toContain("Target: Thermomix (TM7)");
