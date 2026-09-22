@@ -39,7 +39,7 @@ type DisplayRecord = {
   geminiKeyPresent?: boolean;
   openAiKeyPresent?: boolean;
   cookie?: { present?: boolean; key?: string };
-  tm?: { locale?: string; version?: string };
+  tm?: { locale?: string; accountLocale?: string; version?: string };
   mc?: { foodProcessor?: boolean };
   auth?: DisplayRecord;
   recommendations?: string[];
@@ -247,8 +247,9 @@ export function formatDoctorForTerminal(report: DisplayRecord): string {
   parts.push(`  OpenAI image key:  ${report.openAiKeyPresent ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`}`);
   parts.push(`  Cookie:      ${report.cookie?.present ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`} (${report.cookie?.key})`);
   if (report.tm) {
-    parts.push(`  TM locale:   ${report.tm.locale}`);
-    parts.push(`  TM version:  ${report.tm.version}`);
+    parts.push(`  Recipe locale:   ${report.tm.locale}`);
+    parts.push(`  Cookidoo locale: ${report.tm.accountLocale ?? report.tm.locale}`);
+    parts.push(`  TM version:      ${report.tm.version}`);
   }
   if (report.mc) {
     parts.push(`  MC cutter:   ${formatBoolean(report.mc.foodProcessor)}`);
