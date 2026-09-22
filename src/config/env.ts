@@ -90,7 +90,7 @@ export function getTmLocale(fallback = "de-DE"): string {
 export function getTmAccountLocale(fallback?: string): string {
   const value = process.env.TM_ACCOUNT_LOCALE?.trim();
   if (value) return value;
-  return (fallback ?? process.env.TM_LOCALE ?? "de-DE").trim();
+  return (process.env.TM_LOCALE ?? fallback ?? "de-DE").trim();
 }
 
 export function getTmCookie(): string | undefined {
