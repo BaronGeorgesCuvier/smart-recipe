@@ -5,6 +5,35 @@ import type { RecipeInput } from "../src/recipes/schema.js";
 import type { RetrievedRecipePage } from "../src/retriever/types.js";
 
 describe("OpenAIRecipeImageGenerator", () => {
+
+  it("rejects using the Gemini key as the OpenAI image key", () => {
+    const oldGemini = process.env.GEMINI_API_KEY;
+    const oldOpenAI = process.env.OPENAI_API_KEY;
+
+    try {
+      process.env.GEMINI_API_KEY = "same-test-key";
+      process.env.OPENAI_API_KEY = "same-test-key";
+
+      expect(
+        () => new OpenAIRecipeImageGenerator()
+      ).toThrow(
+        "OPENAI_API_KEY must not be the same as GEMINI_API_KEY"
+      );
+    } finally {
+      if (oldGemini === undefined) {
+        delete process.env.GEMINI_API_KEY;
+      } else {
+        process.env.GEMINI_API_KEY = oldGemini;
+      }
+
+      if (oldOpenAI === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = oldOpenAI;
+      }
+    }
+  });
+
   it("generates a new image from recipe context without source images by default", async () => {
     const calls: Array<{ method: "generate" | "edit"; params: Record<string, unknown> }> = [];
     const client = {

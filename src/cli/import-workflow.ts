@@ -45,35 +45,55 @@ export async function resolveTargetDeviceSettings(
   return { device, prompted };
 }
 
-export async function ensureOpenAIKey(isInteractive: boolean, configPath: string): Promise<void> {
-  if (process.env.OPENAI_API_KEY) return;
+export async function ensureGeminiKey(
+  isInteractive: boolean,
+  configPath: string
+): Promise<void> {
+  if (process.env.GEMINI_API_KEY) return;
+
   if (!isInteractive) {
-    throw new Error("OPENAI_API_KEY is not set. Provide it via the environment or run interactively.");
+    throw new Error(
+      "GEMINI_API_KEY is not set. Provide it via the environment or run interactively."
+    );
   }
 
   blankLine();
-  printWarning("No OpenAI API key found.");
-  console.log(`  You can get one at ${colorCyan("https://platform.openai.com/api-keys")}`);
+  printWarning("No Gemini API key found.");
+  console.log(
+    "  Recipe generation uses Gemini. OpenAI credentials are only used for optional AI image generation."
+  );
   blankLine();
 
   const apiKey = await password({
-    message: "  Paste your OpenAI API key",
-    validate: (v) => {
-      if (!v.trim()) return "API key cannot be empty.";
-      if (!/^(sk-|proj-)/.test(v.trim())) return "This doesn't look like a valid OpenAI key (expected sk-… or proj-…).";
-      return true;
-    }
+    message: "  Paste your Gemini API key",
+    validate: (value) =>
+      value.trim()
+        ? true
+        : "API key cannot be empty."
   });
 
-  process.env.OPENAI_API_KEY = apiKey.trim();
+  process.env.GEMINI_API_KEY =
+    apiKey.trim();
 
-  const saveKey = process.env.SAVE_SETTINGS !== "false" && await confirm({
-    message: "  Save this key to ~/.smart-recipe?",
-    default: true
-  });
+  const saveKey =
+    process.env.SAVE_SETTINGS !== "false" &&
+    await confirm({
+      message:
+        "  Save this Gemini key to ~/.smart-recipe?",
+      default: true
+    });
+
   if (saveKey) {
-    upsertDotEnvValue(configPath, "OPENAI_API_KEY", apiKey.trim());
-    printSuccess(`Saved to ${configPath}`);
+    upsertDotEnvValue(
+      configPath,
+      "GEMINI_API_KEY",
+      apiKey.trim()
+    );
+
+    printSuccess(
+      `Saved to ${configPath}`
+    );
+
     blankLine();
   } else {
     process.env.SAVE_SETTINGS = "false";
@@ -81,7 +101,7 @@ export async function ensureOpenAIKey(isInteractive: boolean, configPath: string
 }
 
 export function explicitImageMode(options: Record<string, unknown>): RecipeImageMode | null {
-  if (options.noImage) return "none";
+  if (options.noImage || options.image === false) return "none";
   if (options.useSourceImage) return "skip";
   if (options.recreateImageWithSourceImages || options.imageReferenceSource) return "generate-with-sources";
   if (options.recreateImage) return "generate";
@@ -95,10 +115,6 @@ export function resolveExcludedModes(targetDevice: "mc" | "tm", options: Record<
 
   if (targetDevice === "mc" && !mcHasFoodProcessor() && !excludeModes.includes("foodProcessor")) {
     excludeModes.push("foodProcessor");
-  }
-
-  if (targetDevice === "tm" && !(options.extendTmModes || options.experimentalTmModes) && !excludeModes.includes("cook")) {
-    excludeModes.push("cook");
   }
 
   return excludeModes;

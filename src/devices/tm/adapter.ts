@@ -39,6 +39,30 @@ const ansi = {
 };
 
 type CookidooModeInput = NonNullable<CookidooRecipeInput["steps"][number]["modeAnnotations"]>[number]["mode"];
+
+function hasExplicitTemperature(text: string): boolean {
+  return /\b\d{2,3}\s*°?\s*C\b/i.test(text) || /\bvaroma\b/i.test(text);
+}
+
+function normalizeModeForMatchedText(mode: CookidooModeInput, matchedSubstring: string): CookidooModeInput {
+  if (mode.type !== "tts") return mode;
+
+  const normalized = { ...mode };
+
+  // Gemini occasionally fills the optional temperature with the schema minimum
+  // (37 C) even when the source operation only specifies time + speed.
+  // Never send a temperature unless it is explicitly present in the matched source text.
+  if (!hasExplicitTemperature(matchedSubstring)) {
+    delete normalized.temperature;
+  }
+
+  // Clockwise is Cookidoo's default and does not need to be synthesized.
+  if (normalized.direction === "CW") {
+    delete normalized.direction;
+  }
+
+  return normalized as CookidooModeInput;
+}
 type CookidooValidator = { (data: unknown): boolean; errors?: ErrorObject[] | null };
 
 const Ajv2020 = Ajv2020Module as unknown as new (options: Record<string, unknown>) => {
@@ -81,10 +105,14 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
           matchedSubstring: (ann.matchedSubstring ?? "").trim(),
           ingredientId: (ann.ingredientId ?? "").trim(),
         })),
-        modeAnnotations: (step.modeAnnotations ?? []).map((ann) => ({
-          ...ann,
-          matchedSubstring: (ann.matchedSubstring ?? "").trim(),
-        })),
+        modeAnnotations: (step.modeAnnotations ?? []).map((ann) => {
+          const matchedSubstring = (ann.matchedSubstring ?? "").trim();
+          return {
+            ...ann,
+            matchedSubstring,
+            mode: normalizeModeForMatchedText(ann.mode, matchedSubstring),
+          };
+        }),
       })),
     } as CookidooRecipeInput;
   }
@@ -208,6 +236,11 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
           } else if (m.type === "warmUp") {
             params.push(`${m.temperature}°C`);
             params.push(`Speed ${m.speed}`);
+          } else if (m.type === "tts" || m.type === "cook") {
+            params.push(`${m.time}s`);
+            if (m.temperature !== undefined) params.push(`${m.temperature}°C`);
+            params.push(`Speed ${m.speed}`);
+            if (m.direction) params.push(m.direction);
           } else if (m.type === "steaming") {
             params.push(`${m.time}s`);
             params.push(`Speed ${m.speed}`);
@@ -218,7 +251,8 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
             params.push(`${m.temperature}°C`);
             if (m.power) params.push(m.power);
           }
-          parts.push(`      ${ansi.bold}${ansi.brightYellow}[Mode: ${m.type} | "${ann.matchedSubstring}"${params.length > 0 ? " | " + params.join(", ") : ""}]${ansi.reset}`);
+          const modeLabel = m.type === "tts" || m.type === "cook" ? "TTS" : `Mode: ${m.type}`;
+          parts.push(`      ${ansi.bold}${ansi.brightYellow}[${modeLabel} | "${ann.matchedSubstring}"${params.length > 0 ? " | " + params.join(", ") : ""}]${ansi.reset}`);
         }
       }
 
@@ -277,7 +311,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
   }
 
   async getCurrentUser(cookie: string) {
-    const client = new CookidooClient({ cookie, locale: "de-DE" });
+    const client = new CookidooClient({ cookie, locale: process.env.TM_ACCOUNT_LOCALE ?? process.env.TM_LOCALE ?? "de-DE" });
     return client.request<unknown>({
       method: "GET",
       path: "/community/profile",
@@ -287,7 +321,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
   }
 
   async listDrafts(options: { cookie: string; page?: number; size?: number }) {
-    const locale = (process.env.TM_LOCALE ?? "de-DE") as string;
+    const locale = (process.env.TM_ACCOUNT_LOCALE ?? process.env.TM_LOCALE ?? "de-DE") as string;
     const client = new CookidooClient({ cookie: options.cookie, locale });
     const res = await client.request<unknown>({
       method: "GET",
@@ -331,7 +365,7 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
   }
 
   async getRecipe(options: { cookie: string; id: string; public?: boolean }) {
-    const locale = (process.env.TM_LOCALE ?? "de-DE") as string;
+    const locale = (process.env.TM_ACCOUNT_LOCALE ?? process.env.TM_LOCALE ?? "de-DE") as string;
     const client = new CookidooClient({ cookie: options.cookie, locale });
     
     const isOfficial = /^r\d+$/.test(options.id);
@@ -432,45 +466,67 @@ export class ThermomixAdapter implements DeviceAdapter<CookidooRecipeInput, Cook
       }
     }
 
-    const delays = [30_000, 60_000, 90_000, 120_000];
-    let attempt = 0;
     let draft: unknown;
 
-    const publicUrl = `https://${client.domain}/created-recipes/public/recipes/${client.language}/01KB04WSJP4SHNBKJK4H4FT0PZ`;
+    // Prefer Cookidoo's blank custom-recipe creation endpoint. This avoids the
+    // import/copy rate limit entirely and does not depend on a public dummy recipe.
+    try {
+      logger.info({ title: options.recipeInput.title }, "creating blank Cookidoo recipe");
+      draft = await client.request<unknown>({
+        method: "POST",
+        path: `/created-recipes/${client.language}`,
+        responseSchema: CookidooCopyRecipeResponseSchema,
+        accept: "application/json",
+        body: {
+          recipeName: options.recipeInput.title,
+        },
+      });
+    } catch (createError: unknown) {
+      // Older Cookidoo deployments may not support blank creation. Preserve
+      // the previous copy-from-public flow as a compatibility fallback.
+      logger.warn(
+        { error: createError },
+        "blank Cookidoo recipe creation failed; falling back to public copy"
+      );
 
-    for (;;) {
-      try {
-        logger.info({ publicUrl, attempt }, "copying public dummy recipe to Cookidoo");
-        draft = await client.request<unknown>({
-          method: "POST",
-          path: `/created-recipes/${client.language}`,
-          responseSchema: CookidooCopyRecipeResponseSchema,
-          body: {
-            recipeUrl: publicUrl,
-            servingSize: 1,
-          },
-        });
-        break;
-      } catch (err: unknown) {
-        const errorRecord = isRecord(err) ? err : undefined;
-        const body = getRecord(errorRecord, "body");
-        const isRateLimit =
-          err instanceof CookidooRateLimitError ||
-          getString(errorRecord, "name") === "CookidooRateLimitError" ||
-          getNumber(errorRecord, "status") === 429 ||
-          getString(body, "code") === "importFailed";
+      const delays = [30_000, 60_000, 90_000, 120_000];
+      let attempt = 0;
+      const publicUrl = `https://${client.domain}/created-recipes/public/recipes/${client.language}/01KB04WSJP4SHNBKJK4H4FT0PZ`;
 
-        if (!isRateLimit || attempt >= delays.length) {
-          throw err;
+      for (;;) {
+        try {
+          logger.info({ publicUrl, attempt }, "copying public dummy recipe to Cookidoo");
+          draft = await client.request<unknown>({
+            method: "POST",
+            path: `/created-recipes/${client.language}`,
+            responseSchema: CookidooCopyRecipeResponseSchema,
+            body: {
+              recipeUrl: publicUrl,
+              servingSize: 1,
+            },
+          });
+          break;
+        } catch (err: unknown) {
+          const errorRecord = isRecord(err) ? err : undefined;
+          const body = getRecord(errorRecord, "body");
+          const isRateLimit =
+            err instanceof CookidooRateLimitError ||
+            getString(errorRecord, "name") === "CookidooRateLimitError" ||
+            getNumber(errorRecord, "status") === 429 ||
+            getString(body, "code") === "importFailed";
+
+          if (!isRateLimit || attempt >= delays.length) {
+            throw err;
+          }
+
+          const delayMs = Math.max(getNumber(errorRecord, "retryAfterMs") ?? 0, delays[attempt]);
+          logger.warn(
+            { attempt: attempt + 1, delayMs },
+            `rate limited by Cookidoo copy API. Retrying after delay...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          attempt += 1;
         }
-
-        const delayMs = Math.max(getNumber(errorRecord, "retryAfterMs") ?? 0, delays[attempt]);
-        logger.warn(
-          { attempt: attempt + 1, delayMs },
-          `rate limited by Cookidoo copy API. Retrying after delay...`
-        );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        attempt += 1;
       }
     }
 

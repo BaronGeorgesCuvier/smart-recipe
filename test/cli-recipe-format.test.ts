@@ -197,6 +197,68 @@ describe("CLI Recipe Formatting & Adapters Mapping", () => {
       });
     });
 
+    it("maps custom Cookidoo TTS annotations and uses the configured TM locale", () => {
+      const previousLocale = process.env.TM_LOCALE;
+      process.env.TM_LOCALE = "pl-PL";
+
+      try {
+        const customPayload = {
+          recipeContent: {
+            name: "TTS Test",
+            prepTime: 60,
+            totalTime: 300,
+            yield: { value: 1, unitText: "portion" },
+            ingredients: [{ text: "100 g cebuli" }],
+            instructions: [
+              {
+                text: "Rozdrabniać 5 sek./obr. 5.",
+                annotations: [
+                  {
+                    type: "TTS",
+                    position: { offset: 12, length: 13 },
+                    data: { time: 5, speed: "5" }
+                  }
+                ]
+              },
+              {
+                text: "Gotować 3 min/120°C/obr. 1.",
+                annotations: [
+                  {
+                    type: "TTS",
+                    position: { offset: 8, length: 18 },
+                    data: {
+                      time: 180,
+                      speed: "1",
+                      temperature: { value: "120", unit: "C" }
+                    }
+                  }
+                ]
+              }
+            ],
+            hints: ""
+          }
+        };
+
+        const mapped = mapCustomCookidooToInput(customPayload);
+
+        expect(mapped.settings.locale).toBe("pl-PL");
+        expect(mapped.steps[0].modeAnnotations![0]).toEqual({
+          matchedSubstring: "5 sek./obr. 5",
+          mode: { type: "tts", time: 5, speed: "5" }
+        });
+        expect(mapped.steps[1].modeAnnotations![0]).toEqual({
+          matchedSubstring: "3 min/120°C/obr. 1",
+          mode: { type: "tts", time: 180, speed: "1", temperature: 120 }
+        });
+      } finally {
+        if (previousLocale === undefined) {
+          delete process.env.TM_LOCALE;
+        } else {
+          process.env.TM_LOCALE = previousLocale;
+        }
+      }
+    });
+
     it("maps custom Cookidoo drafts with string hints", () => {
       const customPayload = {
         recipeId: "01KSSGVJPJY3SQ8WXXQTKSFESF",

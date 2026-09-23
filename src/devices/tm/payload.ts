@@ -12,7 +12,6 @@ export type ModeName =
   | "blend"
   | "turbo"
   | "warm_up"
-  | "cook"
   | "rice_cooker"
   | "steaming"
   | "browning";
@@ -40,10 +39,11 @@ export interface IngredientDescriptionData {
     text: string;
     annotations: [];
   };
+  notes?: string[];
 }
 
 export interface Annotation {
-  type: "INGREDIENT" | "MODE";
+  type: "INGREDIENT" | "MODE" | "TTS";
   name?: ModeName;
   data: ModeData & IngredientDescriptionData;
   position: Position;
@@ -52,6 +52,12 @@ export interface Annotation {
 export interface ModeAnnotation extends Annotation {
   type: "MODE";
   name: ModeName;
+  data: ModeData;
+}
+
+export interface TtsAnnotation extends Annotation {
+  type: "TTS";
+  name?: never;
   data: ModeData;
 }
 
@@ -221,6 +227,7 @@ export function createCookidooInstructions(input: CookidooRecipeInput): Step[] {
                   text: ingredientText,
                   annotations: [],
                 },
+                notes: [],
               },
             });
           }
@@ -237,7 +244,7 @@ export function createCookidooInstructions(input: CookidooRecipeInput): Step[] {
         const offset = stepInput.text.indexOf(term, startFrom);
         if (offset !== -1) {
           const m = ann.mode;
-          let modeAnn: ModeAnnotation | null = null;
+          let modeAnn: ModeAnnotation | TtsAnnotation | null = null;
 
           if (m.type === "dough") {
             modeAnn = {
@@ -278,15 +285,28 @@ export function createCookidooInstructions(input: CookidooRecipeInput): Step[] {
               },
               position: { offset, length: term.length },
             };
-          } else if (m.type === "cook") {
+          } else if (m.type === "tts") {
             modeAnn = {
-              type: "MODE",
-              name: "cook",
+              type: "TTS",
+              data: {
+                time: m.time,
+                speed: m.speed,
+                ...(m.temperature !== undefined
+                  ? { temperature: { value: String(m.temperature), unit: "C" as const } }
+                  : {}),
+                ...(m.direction === "CCW" ? { direction: "CCW" as const } : {}),
+              },
+              position: { offset, length: term.length },
+            };
+          } else if (m.type === "cook") {
+            // Backward-compatible input alias for heated TTS operations.
+            modeAnn = {
+              type: "TTS",
               data: {
                 time: m.time,
                 temperature: { value: String(m.temperature), unit: "C" },
                 speed: m.speed,
-                ...(m.direction ? { direction: m.direction } : {}),
+                ...(m.direction === "CCW" ? { direction: "CCW" as const } : {}),
               },
               position: { offset, length: term.length },
             };

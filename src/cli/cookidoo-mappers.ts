@@ -1,3 +1,4 @@
+import process from "node:process";
 import type { CookidooRecipeInput } from "../devices/tm/schema.js";
 import { getArray, getNumber, getRecord, getString, isRecord } from "../utils/unknown.js";
 
@@ -242,6 +243,27 @@ export function mapCustomCookidooToInput(recipe: unknown): CookidooRecipeInput {
               matchedSubstring,
               ingredientId
             });
+          } else if (getString(ann, "type") === "TTS") {
+            const modeData = getRecord(ann, "data") ?? {};
+            const temperature = getRecord(modeData, "temperature");
+            const temperatureValue = getString(temperature, "value") ?? (
+              typeof temperature?.value === "number" ? String(temperature.value) : undefined
+            );
+            const direction = getString(modeData, "direction");
+            const mappedMode = {
+              type: "tts",
+              time: getNumber(modeData, "time") ?? 1,
+              speed: getString(modeData, "speed") ?? "1",
+              ...(temperatureValue !== undefined
+                ? { temperature: Number(temperatureValue) }
+                : {}),
+              ...(direction === "CCW" ? { direction: "CCW" as const } : {}),
+            } as CookidooModeInput;
+
+            modeAnnotations.push({
+              matchedSubstring,
+              mode: mappedMode
+            });
           } else if (getString(ann, "type") === "MODE") {
             const modeName = getString(ann, "name");
             const modeData = getRecord(ann, "data") ?? {};
@@ -278,7 +300,7 @@ export function mapCustomCookidooToInput(recipe: unknown): CookidooRecipeInput {
       };
     }),
     hints: formatCookidooHints(isRecord(content) ? content.hints : undefined),
-    settings: { locale: "de-DE" }
+    settings: { locale: (process.env.TM_LOCALE ?? "de-DE") }
   };
 }
 

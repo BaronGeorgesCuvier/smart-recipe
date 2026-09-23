@@ -5,7 +5,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { Command, Help, Option } from "commander";
 import fs from "node:fs";
-import { loadDotEnv, upsertDotEnvValue, getTmVersion, getTmLocale, mcHasFoodProcessor } from "../config/env.js";
+import { loadDotEnv, upsertDotEnvValue, getTmVersion, getTmLocale, getTmAccountLocale, mcHasFoodProcessor } from "../config/env.js";
 import { categoryPromptText, plannedLocales, supportedLocales } from "../catalogs/index.js";
 import { MonsieurCuisineApiError } from "../mc/errors.js";
 import { CookidooError } from "../devices/tm/errors.js";
@@ -43,7 +43,7 @@ import { resolveAuthInteractively } from "./auth-workflow.js";
 import { blankLine, colorDim, printError, printHeading, printStatus, printSuccess } from "./terminal.js";
 import {
   decideUpload,
-  ensureOpenAIKey,
+  ensureGeminiKey,
   explicitImageMode,
   resolveExcludedModes,
   resolveImageProvider,
@@ -56,7 +56,8 @@ import {
   getOrPromptTargetLocale,
   sourceCookiesFromOptions,
   sourceDeviceForType,
-  sourceLocaleFromOptions
+  sourceLocaleFromOptions,
+  tmAccountLocaleFromOptions
 } from "./settings.js";
 import {
   formatCliError,
@@ -77,11 +78,12 @@ interface DoctorReport {
   configPath: string;
   localEnvPath: string;
   localEnvExists: boolean;
+  geminiKeyPresent: boolean;
   openAiKeyPresent: boolean;
   cookie: { key: string; present: boolean };
   auth: { checked: boolean; ok: boolean; userId?: unknown; message?: string };
   recommendations: string[];
-  tm?: { locale: string; version: string };
+  tm?: { locale: string; accountLocale: string; version: string };
   mc?: { foodProcessor: boolean };
 }
 
@@ -131,6 +133,7 @@ const optionCategories: Record<string, string> = {
   "--locale": "Device & Target Settings",
   "--language": "Device & Target Settings",
   "--source-locale": "Device & Target Settings",
+  "--cookidoo-locale": "Device & Target Settings",
   "--tm-version": "Device & Target Settings",
   "--mc-food-processor": "Device & Target Settings",
   "--exclude-modes": "Device & Target Settings",
@@ -274,8 +277,8 @@ function addImportOptions(cmd: Command): Command {
     .option("--always-upload", "Always upload without asking for confirmation")
     .option("--full-response", "Print the full result object")
     .option("--no-print-markdown", "Do not pretty-print the retrieved markdown to the console")
-    .option("--model <model>", "OpenAI model", process.env.OPENAI_MODEL ?? "gpt-5.5")
-    .option("--reasoning <effort>", "OpenAI reasoning effort: minimal, low, medium, high", process.env.OPENAI_REASONING_EFFORT ?? "medium")
+    .option("--model <model>", "Gemini recipe model", process.env.GEMINI_MODEL ?? "gemini-3.5-flash")
+    .option("--reasoning <effort>", "Recipe generation reasoning effort: minimal, low, medium, high", process.env.GEMINI_REASONING_EFFORT ?? process.env.OPENAI_REASONING_EFFORT ?? "medium")
     .option("--recreate-image", "Generate a new recipe image with OpenAI instead of uploading the source image")
     .option("--recreate-image-with-source-images", "When recreating the image, send downloaded website images as loose visual context")
     .option("--image-reference-source", "Alias for --recreate-image-with-source-images")
@@ -290,6 +293,7 @@ function addImportOptions(cmd: Command): Command {
     .option("--locale <locale>", `Target recipe locale/language (${supportedLocales.join(", ")}; two-letter aliases like de/en/fr are accepted)`)
     .option("--language <locale>", "Alias for --locale")
     .option("--source-locale <locale>", "Locale used for authenticated source APIs when the source URL/ID does not include one")
+    .option("--cookidoo-locale <locale>", "Cookidoo account/market locale for authentication and Created Recipes upload (e.g. pl-PL); independent from --locale recipe language")
     .option("--source-cookie <cookie>", "Cookie header for authenticated source recipe ingestion")
     .option("--mc-source-cookie <cookie>", "Monsieur Cuisine source Cookie header")
     .option("--tm-source-cookie <cookie>", "Cookidoo/Thermomix source Cookie header")
@@ -297,14 +301,14 @@ function addImportOptions(cmd: Command): Command {
     .option("--device <device>", "Target device: 'mc' or 'tm'")
     .option("--tm-version <version>", "Target Thermomix model: 'tm7', 'tm6', or 'tm5'")
     .option("--mc-food-processor <boolean>", "Whether you own the Monsieur Cuisine food processor attachment (true/false)")
-    .option("--extend-tm-modes", "Enable TM modes not supported in My Creations (e.g. the cook/simmer mode). These will show as red in the Cookidoo editor.")
-    .option("--experimental-tm-modes", "Alias for --extend-tm-modes.");
+    .option("--extend-tm-modes", "Legacy compatibility flag. Generic TM cook/simmer steps are emitted as TTS controls automatically.")
+    .option("--experimental-tm-modes", "Legacy alias for --extend-tm-modes.");
 }
 
 program
   .command("import-url")
   .alias("create")
-  .description("Retrieve a recipe page, generate Smart recipe JSON with OpenAI, and optionally upload a draft.")
+  .description("Retrieve a recipe page, generate Smart recipe JSON with Gemini, and optionally upload a draft.")
   .argument("<url>", "Recipe URL");
 addImportOptions(program.commands.at(-1)!);
 program.commands.at(-1)!.action(async (url, options) => {
@@ -335,7 +339,7 @@ program.commands.at(-1)!.action(async (url, options) => {
 program
   .command("import-file")
   .alias("create-file")
-  .description("Retrieve a recipe from a local text file, generate Smart recipe JSON with OpenAI, and optionally upload a draft.")
+  .description("Retrieve a recipe from a local text file, generate Smart recipe JSON with Gemini, and optionally upload a draft.")
   .argument("<file>", "Recipe file path")
   .option("--title <title>", "Custom recipe title")
   .option("--url <url>", "Original recipe URL context");
@@ -360,7 +364,7 @@ program.commands.at(-1)!.action(async (file, options) => {
 program
   .command("import-stdin")
   .alias("create-stdin")
-  .description("Retrieve a recipe from stdin, generate Smart recipe JSON with OpenAI, and optionally upload a draft.")
+  .description("Retrieve a recipe from stdin, generate Smart recipe JSON with Gemini, and optionally upload a draft.")
   .option("--title <title>", "Custom recipe title")
   .option("--url <url>", "Original recipe URL context");
 addImportOptions(program.commands.at(-1)!);
@@ -417,8 +421,11 @@ async function runImport(
   const targetLocaleResult = await getOrPromptTargetLocale(targetDevice, options, isInteractive, GLOBAL_ENV_PATH);
   const targetLocale = targetLocaleResult.locale;
   wasPrompted = wasPrompted || targetLocaleResult.prompted;
+  const uploadLocale = targetDevice === "tm"
+    ? tmAccountLocaleFromOptions(options)
+    : targetLocale;
 
-  await ensureOpenAIKey(isInteractive, GLOBAL_ENV_PATH);
+  await ensureGeminiKey(isInteractive, GLOBAL_ENV_PATH);
 
   // ── Step 2: Generate the recipe ───────────────────────────────────────────
   // Image provider is resolved later (Step 4.5), after the user confirms upload.
@@ -426,7 +433,7 @@ async function runImport(
   const excludeModes = resolveExcludedModes(targetDevice, options);
 
   const generated: GenerateSmartRecipeResult = await withCliSpinner(
-    "Generating recipe with OpenAI...",
+    "Generating recipe with Gemini...",
     spinnerEnabled,
     () => generateSmartRecipe({
       page,
@@ -442,6 +449,10 @@ async function runImport(
       failureMessage: "Recipe generation failed.",
     }
   );
+
+  if (!isJsonMode && generated.cacheHit) {
+    printSuccess("Using cached recipe — Gemini API not called");
+  }
 
   // ── Step 3: Display the recipe ────────────────────────────────────────────
   if (!isJsonMode) {
@@ -483,7 +494,7 @@ async function runImport(
     uploadResult = await uploadSmartRecipe({
       page: generated.page,
       recipeInput: generated.recipeInput,
-      locale: targetLocale,
+      locale: uploadLocale,
       cookie: typeof activeCookie === "string" ? activeCookie : undefined,
       authProvider,
       imageProvider,
@@ -523,7 +534,7 @@ async function runImport(
       uploadResult = await uploadSmartRecipe({
         page: generated.page,
         recipeInput: generated.recipeInput,
-        locale: targetLocale,
+        locale: uploadLocale,
         cookie: newCookie,
         authProvider,
         imageProvider,
@@ -655,7 +666,7 @@ async function resolveCookieForDevice(device: "mc" | "tm", options: Record<strin
 
     printStatus("Signing in to Cookidoo without browser...");
     const result = await adapter.passwordLogin({
-      locale: getTmLocale("de-DE"),
+      locale: getTmAccountLocale("de-DE"),
       credentials: {
         email,
         password: cookidooPassword,
@@ -708,6 +719,7 @@ async function buildDoctorReport(device: "mc" | "tm", options: Record<string, un
     configPath: GLOBAL_ENV_PATH,
     localEnvPath: path.resolve(".env"),
     localEnvExists: fs.existsSync(path.resolve(".env")),
+    geminiKeyPresent: Boolean(process.env.GEMINI_API_KEY),
     openAiKeyPresent: Boolean(process.env.OPENAI_API_KEY),
     cookie: {
       key: options.cookie ? "--cookie" : cookieKey,
@@ -723,6 +735,7 @@ async function buildDoctorReport(device: "mc" | "tm", options: Record<string, un
   if (device === "tm") {
     report.tm = {
       locale: getTmLocale("de-DE"),
+      accountLocale: getTmAccountLocale("de-DE"),
       version: getTmVersion("tm6")
     };
   } else {
@@ -731,8 +744,8 @@ async function buildDoctorReport(device: "mc" | "tm", options: Record<string, un
     };
   }
 
-  if (!report.openAiKeyPresent) {
-    report.recommendations.push("Set OPENAI_API_KEY before importing recipes.");
+  if (!report.geminiKeyPresent) {
+    report.recommendations.push("Set GEMINI_API_KEY before importing recipes.");
   }
   if (!cookie) {
     report.recommendations.push(`Run smart-recipe login-browser --device ${device} --save to create a saved session.`);
@@ -818,7 +831,7 @@ program
     const device = await resolveCommandDevice(options);
     const adapter = getDeviceAdapter(device);
     const cookieKey = adapter.id === "tm" ? "TM_COOKIE" : "MC_COOKIE";
-    const localeKey = adapter.id === "tm" ? "TM_LOCALE" : "MC_LOCALE";
+    const localeKey = adapter.id === "tm" ? "TM_ACCOUNT_LOCALE" : "MC_LOCALE";
     const loginKey = adapter.id === "tm" ? "TM_LOGIN" : "MC_LOGIN";
     const pwKey = adapter.id === "tm" ? "TM_PW" : "MC_PW";
 
@@ -906,7 +919,7 @@ program
           `Opening ${adapter.deviceName} login browser...`,
           spinnerEnabled,
           (spinner) => adapter.browserLogin({
-            locale: sourceDevice === "tm" ? (process.env.TM_LOCALE ?? "de-DE") : (process.env.MC_LOCALE ?? "de-DE"),
+            locale: sourceDevice === "tm" ? getTmAccountLocale("de-DE") : (process.env.MC_LOCALE ?? "de-DE"),
             browserChannel: process.env.SMART_RECIPE_BROWSER_CHANNEL,
             browserPath: process.env.SMART_RECIPE_BROWSER_PATH,
             browserSandbox: browserSandboxFromEnv(),

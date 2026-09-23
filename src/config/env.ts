@@ -83,6 +83,16 @@ export function getTmLocale(fallback = "de-DE"): string {
   return (process.env.TM_LOCALE ?? fallback).trim();
 }
 
+/**
+ * Cookidoo account/market locale used for authentication and Created Recipes API
+ * routing. Kept separate from TM_LOCALE, which controls generated recipe language.
+ */
+export function getTmAccountLocale(fallback?: string): string {
+  const value = process.env.TM_ACCOUNT_LOCALE?.trim();
+  if (value) return value;
+  return (process.env.TM_LOCALE ?? fallback ?? "de-DE").trim();
+}
+
 export function getTmCookie(): string | undefined {
   return process.env.TM_COOKIE || process.env.TM_COOKIES;
 }

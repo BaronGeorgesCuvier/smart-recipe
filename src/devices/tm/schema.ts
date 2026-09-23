@@ -43,6 +43,30 @@ const CookingSpeedSchema = Type.Union([
   Type.Literal("5"),
 ]);
 
+const TtsSpeedSchema = Type.Union([
+  Type.Literal("soft"),
+  Type.Literal("0.5"),
+  Type.Literal("1"),
+  Type.Literal("1.5"),
+  Type.Literal("2"),
+  Type.Literal("2.5"),
+  Type.Literal("3"),
+  Type.Literal("3.5"),
+  Type.Literal("4"),
+  Type.Literal("4.5"),
+  Type.Literal("5"),
+  Type.Literal("5.5"),
+  Type.Literal("6"),
+  Type.Literal("6.5"),
+  Type.Literal("7"),
+  Type.Literal("7.5"),
+  Type.Literal("8"),
+  Type.Literal("8.5"),
+  Type.Literal("9"),
+  Type.Literal("9.5"),
+  Type.Literal("10"),
+]);
+
 // Discrete temperature steps as shown in Cookidoo editor (37–90°C)
 const WarmUpTempSchema = Type.Union([
   Type.Literal(37),
@@ -95,6 +119,16 @@ export const CookidooStepModeSchema = Type.Union([
     type: Type.Literal("warmUp"),
     temperature: WarmUpTempSchema,
     speed: WarmUpSpeedSchema,
+  }, { additionalProperties: false }),
+
+  // Generic tappable Time / Temperature / Speed control for custom recipes.
+  // Use this for ordinary manual runs, including time + speed steps with no temperature.
+  Type.Object({
+    type: Type.Literal("tts"),
+    time: Type.Integer({ minimum: 1, maximum: 5940, description: "Operation time in seconds." }),
+    speed: TtsSpeedSchema,
+    temperature: Type.Optional(Type.Integer({ minimum: 37, maximum: 120, description: "Optional temperature in Celsius." })),
+    direction: Type.Optional(Type.Union([Type.Literal("CW"), Type.Literal("CCW")])),
   }, { additionalProperties: false }),
 
   // General cooking/simmering: temperature 37-120°C, with time, speed, and optional direction.

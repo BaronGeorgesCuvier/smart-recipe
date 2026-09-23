@@ -92,11 +92,16 @@ export class CookidooClient {
   async request<T = unknown>(opts: CookidooRequestOptions): Promise<T> {
     const url = this.buildUrl(opts.path, opts.query);
     const headers: Record<string, string> = {
-      Cookie: this.cookie,
       Accept: opts.accept ?? FULL_VIEW_ACCEPT,
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       ...opts.headers,
     };
+
+    if (/^Bearer\s+/i.test(this.cookie)) {
+      headers.Authorization = this.cookie;
+    } else {
+      headers.Cookie = this.cookie;
+    }
 
     const init: RequestInit = {
       method: opts.method ?? "GET",

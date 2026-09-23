@@ -53,6 +53,66 @@ describe("ThermomixAdapter", () => {
       expect(result.formattedErrors).toContain("title");
     });
 
+    it("strips invented TTS temperature and default clockwise direction when source text has no temperature", () => {
+      const input: CookidooRecipeInput = {
+        ...sampleInput,
+        steps: [
+          {
+            text: "Chop onion 5 s/speed 5.",
+            modeAnnotations: [
+              {
+                matchedSubstring: "5 s/speed 5",
+                mode: {
+                  type: "tts",
+                  time: 5,
+                  speed: "5",
+                  temperature: 37,
+                  direction: "CW"
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const normalized = adapter.normalizeInput(input);
+      const mode = normalized.steps[0].modeAnnotations![0].mode;
+
+      expect(mode.type).toBe("tts");
+      if (mode.type !== "tts") throw new Error("expected tts");
+      expect(mode.temperature).toBeUndefined();
+      expect(mode.direction).toBeUndefined();
+    });
+
+    it("preserves an explicitly written TTS temperature", () => {
+      const input: CookidooRecipeInput = {
+        ...sampleInput,
+        steps: [
+          {
+            text: "Cook 3 min/120°C/speed 1.",
+            modeAnnotations: [
+              {
+                matchedSubstring: "3 min/120°C/speed 1",
+                mode: {
+                  type: "tts",
+                  time: 180,
+                  speed: "1",
+                  temperature: 120
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const normalized = adapter.normalizeInput(input);
+      const mode = normalized.steps[0].modeAnnotations![0].mode;
+
+      expect(mode.type).toBe("tts");
+      if (mode.type !== "tts") throw new Error("expected tts");
+      expect(mode.temperature).toBe(120);
+    });
+
     it("normalizes and trims string fields", () => {
       const unnormalized: CookidooRecipeInput = {
         ...sampleInput,
@@ -165,6 +225,72 @@ describe("ThermomixAdapter", () => {
       expect(annotations!.length).toBe(2);
       expect(annotations![0].name).toBe("dough"); // "Knead for 60s" comes first
       expect(annotations![1].name).toBe("blend"); // "blend speed 6 for 30s" comes second
+    });
+
+    it("emits tappable TTS annotations for time-speed operations without temperature", () => {
+      const inputTts: CookidooRecipeInput = {
+        ...sampleInput,
+        steps: [
+          {
+            text: "Chop onion 5 s/speed 5.",
+            modeAnnotations: [
+              {
+                matchedSubstring: "5 s/speed 5",
+                mode: {
+                  type: "tts",
+                  time: 5,
+                  speed: "5"
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const payload = adapter.createPayload(inputTts);
+      const annotation = payload.instructions[0].annotations![0];
+
+      expect(annotation.type).toBe("TTS");
+      expect(annotation.name).toBeUndefined();
+      expect(annotation.data).toEqual({
+        time: 5,
+        speed: "5"
+      });
+    });
+
+    it("emits tappable TTS annotations for generic time-temperature-speed cooking", () => {
+      const inputCook: CookidooRecipeInput = {
+        ...sampleInput,
+        steps: [
+          {
+            text: "Cook 8 min/100C/reverse/speed 1.",
+            modeAnnotations: [
+              {
+                matchedSubstring: "8 min/100C/reverse/speed 1",
+                mode: {
+                  type: "cook",
+                  time: 480,
+                  temperature: 100,
+                  speed: "1",
+                  direction: "CCW"
+                }
+              }
+            ]
+          }
+        ]
+      };
+
+      const payload = adapter.createPayload(inputCook);
+      const annotation = payload.instructions[0].annotations![0];
+
+      expect(annotation.type).toBe("TTS");
+      expect(annotation.name).toBeUndefined();
+      expect(annotation.data).toEqual({
+        time: 480,
+        temperature: { value: "100", unit: "C" },
+        speed: "1",
+        direction: "CCW"
+      });
     });
 
     it("enforces steaming mode constraints: omits temperature completely", () => {
@@ -295,8 +421,16 @@ describe("ThermomixAdapter", () => {
   describe("Prompt Instructions Versioning", () => {
     const originalEnv = process.env.TM_VERSION;
 
+    beforeEach(() => {
+      delete process.env.TM_VERSION;
+    });
+
     afterEach(() => {
-      process.env.TM_VERSION = originalEnv;
+      if (originalEnv === undefined) {
+        delete process.env.TM_VERSION;
+      } else {
+        process.env.TM_VERSION = originalEnv;
+      }
     });
 
     it("generates instructions targeting TM6 by default", () => {
@@ -309,6 +443,60 @@ describe("ThermomixAdapter", () => {
       const prompt = adapter.getPromptInstructions("de-DE", { version: "TM5" });
       expect(prompt).toContain("Target: Thermomix (TM5)");
       expect(prompt).toContain("Target device is TM5");
+    });
+
+    it("tells the model to use generic TTS and not invent source details", () => {
+      const prompt = adapter.getPromptInstructions("pl-PL", { tmVersion: "tm7" });
+      expect(prompt).toContain("TTS: Generic tappable Time/Temperature/Speed control");
+      expect(prompt).toContain("INGREDIENT IDENTITY FIDELITY");
+      expect(prompt).toContain("do not invent 'short-grain', 'Baldo', or 'Osmancık'");
+      expect(prompt).toContain("do not invent 'cornstarch' or 'wheat starch'");
+    });
+
+    it("requires one uniform scaling factor and ignores recipe-page comments", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("choose ONE uniform scale factor");
+      expect(prompt).toContain("MINIMAL CAPACITY SCALING");
+      expect(prompt).toContain("Choose the largest practical uniform factor");
+      expect(prompt).toContain("0.50 would be unnecessarily small");
+      expect(prompt).toContain("Never scale different quantified ingredients by different factors");
+      expect(prompt).toContain("Scale in the SOURCE UNIT first");
+      expect(prompt).toContain("Ignore reviews, user comments, ratings, testimonials");
+      expect(prompt).toContain("SCALING VERIFICATION");
+    });
+
+    it("keeps visible mode text in the target language and avoids invented accessory handling", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("TARGET-LANGUAGE CONSISTENCY");
+      expect(prompt).toContain("Do not leak German Cookidoo terms");
+      expect(prompt).toContain("For English, use terms such as 'Reverse', 'Speed', 'sec', and 'min'");
+      expect(prompt).toContain("ACCESSORY FIDELITY");
+      expect(prompt).toContain("Ordinary TTS heating/mixing does not by itself justify adding 'without measuring cup'");
+    });
+
+    it("adapts hot foaming liquids without unnecessary extra scaling", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("HOT FOAMING LIQUID ADAPTATION");
+      expect(prompt).toContain("Scale only when a real bowl-capacity or device-limit constraint requires it");
+      expect(prompt).toContain("prefer a Thermomix-safe adaptation such as lower temperature, longer cooking time");
+      expect(prompt).toContain("BOILING SEMANTICS");
+      expect(prompt).toContain("do not claim that 90°C or 95°C itself is boiling");
+      expect(prompt).toContain("Preserve the intended culinary outcome rather than mechanically reproducing the stovetop action");
+    });
+
+    it("forbids guessed dry-ingredient volume-to-mass conversions", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("UNIT-CONVERSION FIDELITY");
+      expect(prompt).toContain("Do not convert a dry ingredient volume to grams");
+      expect(prompt).toContain("convert the volume measure itself to mL");
+      expect(prompt).toContain("do not turn them into guessed gram weights");
+    });
+
+    it("uses Celsius and millilitres for English TM recipes", () => {
+      const prompt = adapter.getPromptInstructions("en-US", { tmVersion: "tm7" });
+      expect(prompt).toContain("temperatures in °C only");
+      expect(prompt).toContain("volume measures in mL");
+      expect(prompt).toContain("Never output °F or fluid ounces");
     });
 
     it("generates instructions targeting TM7 when specified", () => {
@@ -331,9 +519,26 @@ describe("ThermomixAdapter", () => {
   });
 
   describe("Draft listing", () => {
+    const originalLocale = process.env.TM_LOCALE;
+    const originalAccountLocale = process.env.TM_ACCOUNT_LOCALE;
+
+    beforeEach(() => {
+      delete process.env.TM_LOCALE;
+      delete process.env.TM_ACCOUNT_LOCALE;
+    });
+
     afterEach(() => {
       vi.restoreAllMocks();
-      delete process.env.TM_LOCALE;
+      if (originalLocale === undefined) {
+        delete process.env.TM_LOCALE;
+      } else {
+        process.env.TM_LOCALE = originalLocale;
+      }
+      if (originalAccountLocale === undefined) {
+        delete process.env.TM_ACCOUNT_LOCALE;
+      } else {
+        process.env.TM_ACCOUNT_LOCALE = originalAccountLocale;
+      }
     });
 
     it("maps Cookidoo created-recipes items responses", async () => {
@@ -384,7 +589,7 @@ describe("ThermomixAdapter", () => {
       ]);
     });
 
-    it("uses TM_LOCALE when listing drafts", async () => {
+    it("falls back to TM_LOCALE when TM_ACCOUNT_LOCALE is unset", async () => {
       process.env.TM_LOCALE = "en-US";
       const mockRequest = vi.spyOn(CookidooClient.prototype, "request");
       mockRequest.mockResolvedValueOnce([]);
@@ -397,6 +602,24 @@ describe("ThermomixAdapter", () => {
       expect(mockRequest).toHaveBeenCalledWith(expect.objectContaining({
         method: "GET",
         path: "/created-recipes/en-US",
+        responseSchema: expect.any(Object),
+      }));
+    });
+
+    it("prefers TM_ACCOUNT_LOCALE over recipe locale when listing drafts", async () => {
+      process.env.TM_LOCALE = "en-US";
+      process.env.TM_ACCOUNT_LOCALE = "pl-PL";
+      const mockRequest = vi.spyOn(CookidooClient.prototype, "request");
+      mockRequest.mockResolvedValueOnce([]);
+
+      await adapter.listDrafts({
+        cookie: "_oauth2_proxy=foo; v-authenticated=bar",
+        size: 20
+      });
+
+      expect(mockRequest).toHaveBeenCalledWith(expect.objectContaining({
+        method: "GET",
+        path: "/created-recipes/pl",
         responseSchema: expect.any(Object),
       }));
     });
@@ -415,7 +638,10 @@ describe("ThermomixAdapter", () => {
     it("retries copying from public on rate limit status 429 and succeeds on next attempt", async () => {
       const mockRequest = vi.spyOn(CookidooClient.prototype, "request");
 
-      // First call to request fails with 429 (CookidooRateLimitError)
+      // Blank creation fails first, forcing the legacy public-copy fallback.
+      mockRequest.mockRejectedValueOnce(new Error("blank create unavailable"));
+
+      // First copy attempt is rate limited.
       mockRequest.mockRejectedValueOnce(
         new CookidooRateLimitError({
           status: 429,
@@ -426,7 +652,7 @@ describe("ThermomixAdapter", () => {
         })
       );
 
-      // Second, third, and fourth calls succeed (POST copy, PATCH meta, PATCH instructions)
+      // Retry succeeds, followed by metadata and instruction patches.
       mockRequest.mockResolvedValueOnce({ recipeId: "draft-recipe-id-123" });
       mockRequest.mockResolvedValueOnce({ success: true });
       mockRequest.mockResolvedValueOnce({ success: true });
@@ -469,7 +695,7 @@ describe("ThermomixAdapter", () => {
 
       expect(result.recipeUrl).toBe("https://cookidoo.de/created-recipes/de-DE/draft-recipe-id-123");
       expect(result.draft.id).toBe("draft-recipe-id-123");
-      expect(mockRequest).toHaveBeenCalledTimes(4);
+      expect(mockRequest).toHaveBeenCalledTimes(5);
     });
 
     it("gives up retrying after maximum attempts exceed", async () => {
@@ -519,6 +745,48 @@ describe("ThermomixAdapter", () => {
       }
 
       await expect(uploadPromise).rejects.toThrow(CookidooRateLimitError);
+    });
+
+    it("creates a blank custom recipe before patching metadata and instructions", async () => {
+      const mockRequest = vi.spyOn(CookidooClient.prototype, "request");
+      mockRequest.mockResolvedValueOnce({ recipeId: "blank-draft-id-123" });
+      mockRequest.mockResolvedValueOnce({ success: true });
+      mockRequest.mockResolvedValueOnce({ success: true });
+
+      const logger = {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn()
+      };
+
+      const result = await adapter.upload({
+        payload: adapter.createPayload(sampleInput),
+        recipeInput: sampleInput,
+        page: {
+          url: "https://example.com/recipe",
+          finalUrl: "https://example.com/recipe",
+          title: "Test Recipe",
+          markdown: "",
+          html: "",
+          images: []
+        },
+        locale: "de-DE",
+        cookie: "_oauth2_proxy=foo; v-authenticated=bar; v-is-authenticated=true",
+        logger
+      });
+
+      expect(mockRequest).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        method: "POST",
+        path: "/created-recipes/de-DE",
+        accept: "application/json",
+        body: { recipeName: "Test Recipe" }
+      }));
+      expect(mockRequest).toHaveBeenCalledTimes(3);
+      expect(result.draft.id).toBe("blank-draft-id-123");
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining("falling back to public copy")
+      );
     });
 
     it("accepts nested Cookidoo copy responses when extracting the new draft ID", async () => {
@@ -750,38 +1018,68 @@ describe("ThermomixAdapter", () => {
   });
 
   describe("Cookidoo browserless OAuth login", () => {
-    it("follows the redirect flow, posts credentials, and returns Cookidoo session cookies", async () => {
+    it("uses authorization-code + PKCE and returns a bearer credential", async () => {
       const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
         const href = String(url);
         const method = init?.method ?? "GET";
 
-        if (href === "https://cookidoo.de/profile/de-DE/login?redirectAfterLogin=%2Ffoundation%2Fde-DE%2Ffor-you") {
-          return redirectResponse("https://cookidoo.de/oauth2/start?market=de&ui_locales=de-DE&rd=%2Ffoundation%2Fde-DE%2Ffor-you");
+        if (href === "https://ciam.prod.cookidoo.vorwerk-digital.com/.well-known/openid-configuration") {
+          return new Response(JSON.stringify({
+            authorization_endpoint: "https://ciam.prod.cookidoo.vorwerk-digital.com/authz-srv/authz",
+            token_endpoint: "https://ciam.prod.cookidoo.vorwerk-digital.com/token-srv/token",
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
         }
-        if (href.startsWith("https://cookidoo.de/oauth2/start")) {
-          return redirectResponse("https://ciam.prod.cookidoo.vorwerk-digital.com/authz-srv/authz?client_id=tmde2-live-v1&state=state-123");
-        }
+
         if (href.startsWith("https://ciam.prod.cookidoo.vorwerk-digital.com/authz-srv/authz")) {
-          return redirectResponse("https://eu.login.vorwerk.com/ciam/login?requestId=request-from-url&view_type=login");
+          const authUrl = new URL(href);
+          expect(authUrl.searchParams.get("client_id")).toBe("mobile-android");
+          expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+          expect(authUrl.searchParams.get("code_challenge")).toBeTruthy();
+          expect(authUrl.searchParams.get("market")).toBe("de");
+          const state = authUrl.searchParams.get("state");
+          return redirectResponse(
+            `https://ciam.prod.cookidoo.vorwerk-digital.com/login?state=${state}`
+          );
         }
-        if (href.startsWith("https://eu.login.vorwerk.com/ciam/login")) {
+
+        if (href.startsWith("https://ciam.prod.cookidoo.vorwerk-digital.com/login?state=")) {
           return new Response('<form><input type="hidden" name="requestId" value="request-123"></form>', {
             status: 200,
             headers: { "content-type": "text/html" },
           });
         }
+
         if (href === "https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login" && method === "POST") {
-          return redirectResponse("https://cookidoo.de/oauth2/callback?code=auth-code&state=state-123", {
-            "set-cookie": "cidaas_sid=sid; Domain=ciam.prod.cookidoo.vorwerk-digital.com; Path=/",
-          });
+          const body = String(init?.body ?? "");
+          expect(body).toContain("requestId=request-123");
+          expect(body).toContain("username=cook%40example.test");
+          expect(body).toContain("password=secret");
+
+          const authorizeCall = (fetchImpl as unknown as { mock: { calls: Array<[string | URL | Request, RequestInit | undefined]> } }).mock.calls
+            .find(([requestUrl]) => String(requestUrl).startsWith("https://ciam.prod.cookidoo.vorwerk-digital.com/authz-srv/authz"));
+          const state = new URL(String(authorizeCall?.[0])).searchParams.get("state");
+          return redirectResponse(
+            `com.vorwerk.cookidoo://code-grant?code=auth-code&state=${state}`
+          );
         }
-        if (href.startsWith("https://cookidoo.de/oauth2/callback")) {
-          return redirectResponse("/foundation/de-DE/for-you", {
-            "set-cookie": "_oauth2_proxy=session; Domain=cookidoo.de; Path=/, v-authenticated=sig; Domain=cookidoo.de; Path=/, v-is-authenticated=true; Domain=cookidoo.de; Path=/",
+
+        if (href === "https://ciam.prod.cookidoo.vorwerk-digital.com/token-srv/token" && method === "POST") {
+          const body = new URLSearchParams(String(init?.body ?? ""));
+          expect(body.get("grant_type")).toBe("authorization_code");
+          expect(body.get("code")).toBe("auth-code");
+          expect(body.get("client_id")).toBe("mobile-android");
+          expect(body.get("code_verifier")).toBeTruthy();
+          return new Response(JSON.stringify({
+            access_token: "access-token-123",
+            refresh_token: "refresh-token-123",
+            expires_in: 43200,
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
           });
-        }
-        if (href === "https://cookidoo.de/foundation/de-DE/for-you") {
-          return new Response("ok", { status: 200 });
         }
 
         throw new Error(`Unexpected request: ${method} ${href}`);
@@ -797,18 +1095,35 @@ describe("ThermomixAdapter", () => {
       });
 
       expect(result).toEqual({
-        cookie: "_oauth2_proxy=session; v-authenticated=sig; v-is-authenticated=true",
+        cookie: "Bearer access-token-123",
         source: "cookidoo-password",
-        cookieNames: ["_oauth2_proxy", "cidaas_sid", "v-authenticated", "v-is-authenticated"],
+        cookieNames: ["access_token"],
+      });
+    });
+
+    it("sends bearer credentials through Authorization instead of Cookie", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      ) as unknown as typeof fetch;
+
+      const client = new CookidooClient({
+        cookie: "Bearer access-token-123",
+        locale: "de-DE",
+        fetch: fetchImpl,
       });
 
-      const postCall = (fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls.find(([url, init]) =>
-        String(url) === "https://ciam.prod.cookidoo.vorwerk-digital.com/login-srv/login" && init?.method === "POST"
-      );
-      expect(postCall).toBeDefined();
-      const [, postInit] = postCall!;
-      expect(String(postInit.body)).toBe("requestId=request-123&username=cook%40example.test&password=secret");
-      expect(new Headers(postInit.headers).get("Referer")).toBe("https://eu.login.vorwerk.com/ciam/login?requestId=request-from-url&view_type=login");
+      await client.request({
+        path: "/community/profile",
+        accept: "application/json",
+      });
+
+      const [, init] = (fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls[0];
+      const headers = new Headers(init.headers);
+      expect(headers.get("Authorization")).toBe("Bearer access-token-123");
+      expect(headers.get("Cookie")).toBeNull();
     });
   });
 });

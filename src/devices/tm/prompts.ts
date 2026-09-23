@@ -28,14 +28,27 @@ export function buildCookidooRecipeInstructions(
       ? `IMPORTANT: The following modes are excluded by user preference: ${excludeModes.join(", ")}. Do NOT use them.`
       : "",
     "",
-    "You may adjust the order of steps or simplify steps so they can be performed with the machine if this does not materially change the final dish. Transform the recipe into a Thermomix-native recipe with as few manual steps as practical.",
+    "Adapt only what is necessary to make the recipe executable on Thermomix. Preserve source ingredient quantities, preparation qualifiers, step intent, time, temperature, speed, direction, and order unless a device constraint requires a change.",
+    "SOURCE AUTHORITY: Treat only the recipe author's ingredient list, method/instructions, yield, timing, and explicit notes as authoritative recipe content. Ignore reviews, user comments, ratings, testimonials, 'tried it' notes, related-recipe text, advertising, navigation, and social-media boilerplate even when they appear inside the retrieved Markdown.",
+    "INGREDIENT IDENTITY FIDELITY: Preserve the ingredient identity exactly at the level stated by the source. Do NOT add varieties, examples, brands, botanical types, starch types, fat percentages, cuts, ripeness, preparation qualifiers, substitutions, or alternatives that the source does not state. Example: source 'rice' must remain simply rice; do not invent 'short-grain', 'Baldo', or 'Osmancık'. Source 'starch' must remain simply starch; do not invent 'cornstarch' or 'wheat starch'.",
+    "Do NOT invent optional garnishes, serving suggestions, substitutions, flavor additions, or hints that are absent from the authoritative source. If the source has no hints or serving suggestions, set hints to an empty string.",
     "",
-    "STRICT CAPACITY LIMIT: The mixing bowl holds a maximum of 2.2 liters (approx. 2200 g). You MUST mentally calculate the cumulative weight and volume of all ingredients currently in the bowl at every step. If the total exceeds 2200 g/ml at any point, you MUST scale down the entire recipe proportionally from the very beginning to ensure safe cooking without overflowing.",
+    "STRICT CAPACITY LIMIT: The mixing bowl holds a maximum of 2.2 liters (approx. 2200 g). You MUST calculate the cumulative weight and volume of all ingredients currently in the bowl at every step. If the recipe would exceed this limit, choose ONE uniform scale factor less than 1.0 before generating the ingredient list and apply that exact factor to every scalable source ingredient from the beginning.",
+    "MINIMAL CAPACITY SCALING: Preserve as much of the source recipe yield as possible. First estimate the unscaled peak bowl contents, then calculate the maximum allowed factor as approximately 2200 divided by that peak amount. Choose the largest practical uniform factor that stays at or below that maximum; round downward only as much as needed for usable quantities. Do NOT arbitrarily halve a recipe or jump to a much smaller factor when a larger factor fits. Example: if the unscaled peak is about 2680 mL, the mathematical maximum is about 0.82, so a practical factor around 0.80 is appropriate; 0.50 would be unnecessarily small.",
+    "UNIFORM SCALING RULE: Never scale different quantified ingredients by different factors. Scale in the SOURCE UNIT first, then translate/convert units only after scaling. Any later conversion to grams or milliliters must represent that same scaled source amount; do not round one ingredient using a different effective factor.",
+    "SCALING EXCEPTIONS: Do not scale quantities that are inherently 'to taste', 'as needed', or unquantified garnish/finishing amounts. Optional quantified ingredients should still use the same scale factor if retained.",
+    "SCALING VERIFICATION: Before returning JSON, compare every quantified output ingredient against the source and verify that either (a) it is unchanged because no scaling was needed, or (b) it equals the source amount multiplied by the single chosen scale factor. If this check fails, correct the ingredient list before returning.",
+    "HOT FOAMING LIQUID ADAPTATION: Do not reduce recipe yield merely because milk, cream, starch-thickened liquid, or another mixture may foam while heating. Scale only when a real bowl-capacity or device-limit constraint requires it. When the source calls for boiling a foaming liquid and the recipe fits within the bowl capacity, prefer a Thermomix-safe adaptation such as lower temperature, longer cooking time, low speed, and Reverse/CCW where appropriate rather than shrinking the recipe further.",
+    "BOILING SEMANTICS: If the source explicitly says 'boil', 'bring to a boil', 'boil for N minutes', or an equivalent outcome such as 'two boils', you may intentionally adapt that stovetop action to sub-boiling Thermomix cooking when that better controls foaming or scorching. In that case, use honest outcome-focused wording such as 'heat', 'cook', or 'cook until thickened' and choose a suitable longer duration; do not claim that 90°C or 95°C itself is boiling. Preserve the intended culinary outcome rather than mechanically reproducing the stovetop action.",
     "",
     "DOUGH LIMIT: The motor cannot knead heavy doughs above 800 g of flour (approx. 1300 g total dough weight). If the source recipe exceeds this, you MUST scale it down.",
     "",
     `Use ${localeGuidance.outputLanguage} for every user-facing recipe field and set settings.locale to ${localeGuidance.locale}. Translate where necessary.`,
+    "TARGET-LANGUAGE CONSISTENCY: Every word in title, ingredients, step text, hints, and visible machine-setting phrases must use the target language. Do not leak German Cookidoo terms such as 'Linkslauf', 'Rechtslauf', 'Stufe', 'Sek.', or 'Min.' into non-German output. For English, use terms such as 'Reverse', 'Speed', 'sec', and 'min'.",
+    "ACCESSORY FIDELITY: Do not invent measuring-cup removal, basket placement, lid-opening instructions, spatula use, or other accessory handling unless it is explicitly present in the source or technically required to execute a selected Thermomix mode safely. Ordinary TTS heating/mixing does not by itself justify adding 'without measuring cup'.",
     `Convert units to ${localeGuidance.unitConvention}`,
+    "UNIT-CONVERSION FIDELITY: Never invent an ingredient-specific mass/volume equivalence that is not stated by the source or supplied by a deterministic conversion rule. Do not convert a dry ingredient volume to grams unless a source-supported deterministic conversion exists; convert the volume measure itself to mL instead when a project convention exists.",
+    "TURKISH VOLUME CONVENTIONS FOR METRIC OUTPUT: When a Turkish source uses these standard recipe measures and the target output is metric, use: 1 su bardağı = 200 mL, 1 çay bardağı = 100 mL, 1 yemek kaşığı = 15 mL, 1 tatlı kaşığı = 10 mL, 1 çay kaşığı = 5 mL. Apply any uniform recipe scale factor first, then convert to mL. These are volume conversions only; do not turn them into guessed gram weights.",
     "",
     "STEP FORMAT — TEXT & ANNOTATIONS:",
     "Each step is a structured object containing:",
@@ -53,14 +66,16 @@ export function buildCookidooRecipeInstructions(
     "- For modeAnnotations, specify the exact phrase describing the guided mode (e.g. \"10 Sek./Stufe 7 zerkleinern\", \"Dank Linkslauf 15 Min./Stufe 1 garen\"). Only annotate the guided mode once per operation (do NOT duplicate mode annotations).",
     "",
     "GUIDED MODE RULES & CONSTRAINTS (based on exact Cookidoo editor values):",
-    "1. COOK: Standard simmering/cooking. Temperature 37–120°C (any integer), time in seconds, speed soft/1–5, optional direction CW/CCW. Excluded by default for My Creations — only use if --extend-tm-modes is set.",
-    "2. STEAMING: Varoma cooking. NO temperature field. Time 1–5940s (max 99 min). Speed: soft, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5. Direction: CW or CCW. Accessory: 'Varoma', 'Gareinsatz', or 'both'.",
-    "3. BROWNING: TM6/TM7 only. Time 1–1800s (max 30 min). Temperature MUST be one of [140, 145, 150, 155, 160]. Do not set power; Cookidoo My Creations rejects the unconfirmed power field.",
-    "4. DOUGH: Time 1–1200s (max 20 min). No speed or temperature.",
-    "5. BLEND (Pürieren): HIGH-SPEED ONLY. Speed MUST be one of [6, 6.5, 7, 7.5, 8]. Time 10–300s (min 10s, max 5 min). Do NOT use for speed 1–5 operations — leave those as plain text runs.",
-    "6. TURBO: Short maximum-speed pulses. Use 'pulseDuration' (must be exactly 0.5, 1, or 2) and optional 'pulseCount' (1–9).",
-    "7. WARM UP (Erwärmen): Temperature must be one of [37, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90] °C. Speed: soft, 1, or 2. No time field.",
-    "8. RICE COOKER: No parameters.",
+    "1. TTS: Generic tappable Time/Temperature/Speed control for ordinary Thermomix runs. Use for source operations such as 5 s/speed 5, 20 s/speed 4, or 15 min/100°C/speed 1. time is required; speed is required; temperature 37–120°C is optional; direction CW/CCW is optional. Prefer TTS whenever the source explicitly gives ordinary time/speed settings that are not a dedicated guided mode.",
+    "TTS TEMPERATURE FIDELITY: If the source operation does not explicitly specify a temperature, OMIT the temperature field entirely. Never use 37°C or any other temperature as a placeholder/default.",
+    "2. COOK: Backward-compatible heated TTS alias. Temperature 37–120°C, time in seconds, speed soft/1–5, optional direction CW/CCW. Prefer type 'tts' for new output.",
+    "3. STEAMING: Varoma cooking. NO temperature field. Time 1–5940s (max 99 min). Speed: soft, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5. Direction: CW or CCW. Accessory: 'Varoma', 'Gareinsatz', or 'both'.",
+    "4. BROWNING: TM6/TM7 only. Time 1–1800s (max 30 min). Temperature MUST be one of [140, 145, 150, 155, 160]. Do not set power; Cookidoo My Creations rejects the unconfirmed power field.",
+    "5. DOUGH: Time 1–1200s (max 20 min). No speed or temperature.",
+    "6. BLEND (Pürieren): HIGH-SPEED ONLY. Speed MUST be one of [6, 6.5, 7, 7.5, 8]. Time 10–300s (min 10s, max 5 min). Use TTS instead for ordinary short/manual speed operations that are not truly puree/blend mode.",
+    "7. TURBO: Short maximum-speed pulses. Use 'pulseDuration' (must be exactly 0.5, 1, or 2) and optional 'pulseCount' (1–9).",
+    "8. WARM UP (Erwärmen): Temperature must be one of [37, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90] °C. Speed: soft, 1, or 2. No time field.",
+    "9. RICE COOKER: No parameters.",
     "",
     "EXAMPLES (ingredients list for these examples: [\"25 g frischer Koriander\", \"2 Knoblauchzehen\", \"1 Zwiebel, halbiert\", \"15 g Ingwer, frisch\", \"20 g Pflanzenöl\", \"1 EL Currypulver\", \"½ TL Chiliflocken\", \"150 g rote Linsen\", \"400 g stückige Tomaten\", \"400 g Kokosmilch\", \"600 g Wasser\"]):",
     JSON.stringify([
@@ -74,11 +89,14 @@ export function buildCookidooRecipeInstructions(
         ]
       },
       {
-        text: "Zwiebel, Knoblauch und Ingwer in den Mixtopf geben und 5 Sek./Stufe 5 zerkleinern. Mit dem Spatel nach unten schieben.",
+        text: "Zwiebel, Knoblauch und Ingwer in den Mixtopf geben und 5 Sek./Stufe 5 zerkleinern.",
         ingredientAnnotations: [
           { matchedSubstring: "Zwiebel", ingredientId: "zwiebel" },
           { matchedSubstring: "Knoblauch", ingredientId: "knoblauch" },
           { matchedSubstring: "Ingwer", ingredientId: "ingwer" }
+        ],
+        modeAnnotations: [
+          { matchedSubstring: "5 Sek./Stufe 5 zerkleinern", mode: { type: "tts", time: 5, speed: "5" } }
         ]
       },
       {
@@ -103,10 +121,10 @@ export function buildCookidooRecipeInstructions(
     ], null, 2),
     "",
     "GENERAL STYLE & CONVENTIONS:",
-    "- Paraphrase description and steps to avoid reproducing copyrighted source text. Describe the recipe as if it were original.",
-    "- Make an educated guess on nutrients (calories, carbohydrate, fat, protein) if missing from source. Amount must be whole integers.",
-    "- Be specific, concise, and clear. Make the recipe foolproof.",
-    "- hints: Extract any useful tips, variations, or serving suggestions from the source recipe into the hints field. Omit tips that are irrelevant to Thermomix (e.g. stovetop-only alternatives). Use an empty string if there are no useful tips."
+    "- Paraphrase source wording as needed, but preserve factual recipe content and machine settings.",
+    "- Do not add culinary facts that are not supported by the source.",
+    "- Be specific, concise, and clear.",
+    "- hints: Extract only tips, variations, or serving suggestions explicitly present in the source recipe. Never invent them. Use an empty string if the source provides none."
   ];
 
   return instructions.filter(Boolean).join("\n");

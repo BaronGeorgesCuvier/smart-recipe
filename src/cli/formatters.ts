@@ -36,9 +36,10 @@ type DisplayRecord = {
   deviceName?: string;
   configPath?: string;
   localEnvPath?: string;
+  geminiKeyPresent?: boolean;
   openAiKeyPresent?: boolean;
   cookie?: { present?: boolean; key?: string };
-  tm?: { locale?: string; version?: string };
+  tm?: { locale?: string; accountLocale?: string; version?: string };
   mc?: { foodProcessor?: boolean };
   auth?: DisplayRecord;
   recommendations?: string[];
@@ -242,11 +243,13 @@ export function formatDoctorForTerminal(report: DisplayRecord): string {
   parts.push(`  Device:      ${boldCyan}${report.deviceName}${reset}`);
   parts.push(`  Config:      ${report.configPath}`);
   parts.push(`  Local .env:  ${report.localEnvPath}`);
-  parts.push(`  OpenAI key:  ${report.openAiKeyPresent ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`}`);
+  parts.push(`  Gemini key:        ${report.geminiKeyPresent ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`}`);
+  parts.push(`  OpenAI image key:  ${report.openAiKeyPresent ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`}`);
   parts.push(`  Cookie:      ${report.cookie?.present ? `${boldGreen}present${reset}` : `${boldYellow}missing${reset}`} (${report.cookie?.key})`);
   if (report.tm) {
-    parts.push(`  TM locale:   ${report.tm.locale}`);
-    parts.push(`  TM version:  ${report.tm.version}`);
+    parts.push(`  Recipe locale:   ${report.tm.locale}`);
+    parts.push(`  Cookidoo locale: ${report.tm.accountLocale ?? report.tm.locale}`);
+    parts.push(`  TM version:      ${report.tm.version}`);
   }
   if (report.mc) {
     parts.push(`  MC cutter:   ${formatBoolean(report.mc.foodProcessor)}`);

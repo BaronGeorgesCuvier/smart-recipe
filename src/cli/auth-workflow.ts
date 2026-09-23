@@ -1,5 +1,5 @@
 import process from "node:process";
-import { upsertDotEnvValue } from "../config/env.js";
+import { getTmAccountLocale, upsertDotEnvValue } from "../config/env.js";
 import { CookieAuthProvider, type AuthProvider } from "../mc/auth.js";
 import type { DeviceAdapter } from "../devices/adapter.js";
 import type { SupportedLocale } from "../catalogs/types.js";
@@ -28,6 +28,9 @@ type CliAuthAdapter = DeviceAdapter & {
 };
 
 function envLocale(key: string): SupportedLocale {
+  if (key === "TM_ACCOUNT_LOCALE") {
+    return getTmAccountLocale("de-DE") as SupportedLocale;
+  }
   return (process.env[key] ?? "de-DE") as SupportedLocale;
 }
 
@@ -125,7 +128,7 @@ async function tryPasswordLogin(
   }
   if (!email || !password) return null;
 
-  const locale = envLocale("TM_LOCALE");
+  const locale = envLocale("TM_ACCOUNT_LOCALE");
   try {
     const passwordLogin = adapter.passwordLogin;
     if (!passwordLogin) return null;
@@ -157,7 +160,7 @@ async function tryPasswordLogin(
 async function trySilentSessionRefresh(adapter: CliAuthAdapter, configPath: string): Promise<AuthProvider | null> {
   if (adapter.id !== "tm") return null;
 
-  const locale = envLocale("TM_LOCALE");
+  const locale = envLocale("TM_ACCOUNT_LOCALE");
   try {
     const spinnerEnabled = Boolean(process.stderr.isTTY);
     const result = await withCliSpinner<CapturedSession>(
@@ -191,7 +194,7 @@ export async function attemptBrowserLogin(
   configPath: string
 ): Promise<AuthProvider> {
   const isTm = adapter.id === "tm";
-  const localeKey = isTm ? "TM_LOCALE" : "MC_LOCALE";
+  const localeKey = isTm ? "TM_ACCOUNT_LOCALE" : "MC_LOCALE";
   const cookieKey = isTm ? "TM_COOKIE" : "MC_COOKIE";
   const loginKey = isTm ? "TM_LOGIN" : "MC_LOGIN";
   const pwKey = isTm ? "TM_PW" : "MC_PW";
